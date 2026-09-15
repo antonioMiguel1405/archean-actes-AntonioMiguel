@@ -828,6 +828,130 @@ the retrieval lexicon, not a textbook list.
 glossary**, the cheapest possible way to show the reviewer we closed the French gap deliberately
 rather than by luck. They said explicitly they find *how* we close it interesting.
 
+### 11.1 Number and date literals — audit before building `frenchnum.py`
+
+Measured over all 11 254 OCR lines of the 17 actes. The point of this audit is to keep the
+parser scoped to what this corpus actually contains, and to avoid promoting "valid French"
+into "present in the corpus".
+
+#### Spelled-out numbers — `[F]` observed
+
+Every spelled numeral that appears beside its own digits, which is how these documents
+write the operative amounts:
+
+| written form (normalized) | value | where |
+|---|---|---|
+| `trente sept mille` | 37 000 | constitution, art. 7 |
+| `trois cent soixante dix` | 370 | constitution, art. 6 and 7 (×4) |
+| `cent` | 100 | nominal, several |
+| `cent cinquante mille` | 150 000 | 2006 statutes, art. 7 |
+| `mille cinq cent` | 1 500 | 2006 statutes, art. 7 |
+| `deux cent mille` | 200 000 | 2007 statutes, art. 7 |
+| `deux mille` | 2 000 | 2007 statutes, art. 7 |
+| `cinq cents` | 500 | registration stamps (×3) |
+| `deux cent quatre-vingt-quinze` | 295 | registration stamp |
+
+`[F]` **Hyphens are not reliable in this corpus.** The same grammar appears both ways:
+`trois cent soixante dix` (70 written with a space) sits four lines from
+`quatre-vingt-quinze` (fully hyphenated), and in dates `deux mille dix-sept` coexists with
+`deux mille dix huit`. A parser that requires hyphens fails here; one that requires spaces
+fails too. Both must be accepted as separators.
+
+`[F]` **`cents` takes its plural** (`cinq cents` = 500). `[F]` **`vingts` never appears** in
+the corpus — 0 occurrences.
+
+#### Spelled-out numbers — `[F]` *not* observed
+
+These are grammatical French but have **zero occurrences** here: `vingts`, `mil` (the
+archaic year form, e.g. *mil neuf cent*), `million`, `milliard`, and numeral-sense
+`et un` outside the single date `vingt-et-un`. All 27 hits for `et un` are the ordinary
+conjunction (`un plan de financement et un plan de trésorerie`).
+
+`[R]` The parser still implements the full standard grammar for 0–999 999 999 including
+`million`, `vingts` and `soixante-et-onze`, because the rules are closed and well defined
+and the extra code is a lookup table. But `mil` as a year form is **deliberately excluded**:
+supporting it would make `mil` ambiguous against a misread `mille`, for zero benefit here.
+Which forms are corpus-attested and which are implemented-for-completeness is recorded in
+the module docstring, so nobody later mistakes coverage for evidence.
+
+#### Dates — `[F]` observed, in three shapes
+
+| shape | example | count |
+|---|---|---|
+| **A.** numeric day + month word + numeric year | `17 mai 2005`, `2 septembre 2005` | 48 distinct |
+| **B.** `dd/mm/yyyy` | `27/06/2008`, `22/12/2004` | 20 distinct |
+| **C.** fully spelled | `Le vingt neuf janvier deux mille treize,` | see below |
+
+`[F]` **Shape C is normally split across two OCR lines**, because the act's preamble is
+typeset that way:
+
+```
+L'an deux mille dix-sept,        <- year only
+Le vingt-et-un février,          <- day and month only
+```
+
+Only one line in the corpus carries a complete spelled date by itself
+(`Le vingt neuf janvier deux mille treize,`). `[R]` So the parser exposes a *parts* API that
+returns `day`/`month`/`year` with `None` for whatever is absent, and a strict API that
+refuses to return a date until all three are known. Recombining a year from one line with a
+day from another is a caller's decision made against layout evidence — not something a
+number parser may do silently.
+
+`[F]` Month spellings emitted by OCR: accented lower case (`août`, `décembre`, `février`)
+and unaccented upper case (`FEVRIER`, `JANVIER`, `MAI`, `MARS`, `JUIN`, `NOVEMBRE`,
+`OCTOBRE`, `SEPTEMBRE`). `[F]` **`avril` never occurs** in these 17 actes. No month name is
+OCR-corrupted anywhere in the corpus.
+
+`[I]` `dd/mm/yyyy` ordering is inferred, not stated: of the 20 distinct numeric dates, those
+that disambiguate themselves all have `day > 12` (`27/06`, `22/12`, `31/03`, `17/05`), and
+none has a first component above 31. Combined with French convention this makes day-first
+certain in practice, but `05/01/2005` is formally ambiguous on its own. `[R]` The parser
+parses day-first and **returns an explicit `day_month_ambiguous` flag** when both components
+are ≤ 12, rather than hiding the assumption.
+
+#### OCR corruption — `[F]` every instance, with its example
+
+Letters substituted for digits *inside* a numeral. These are all of them:
+
+| corrupted | intended | substitution | where |
+|---|---|---|---|
+| `37.0o0` | 37.000 | `o`→`0` | `…ec5` p.3, the constitution's capital |
+| `200s` | 2005 | `s`→`5` | `…ec4` p.6, `le 17 mai 200s` |
+| `400/o0o` | 400.000 | `/`→`.`, `o`→`0` | `…ec0` p.4 |
+| `5o0` | 500 | `o`→`0` | registration stamp |
+| `2o08` | 2008 | `o`→`0` | registration stamp |
+| `26S6` | 2656 | `S`→`5` | greffe stamp |
+| `820o0` | 82000 | `o`→`0` | a postcode |
+| `cing` | `cinq` | `g`→`q` | `cing cents euros`, `délai maximum de cing` |
+
+`[F]` Corruptions of the *currency word* also occur — `euròs`, `euøs`, `curos`, `buros` —
+but they never touch the numeral, so the number parser does not need them.
+
+`[F]` **Fuzzy correction would be actively harmful here.** Scanning every token in the corpus
+for edit-distance-1 neighbours of a number or month word returns `nombre` (143×, "number"),
+`mais` (33×, "but"), `main` (16×, "hand") and `d'eux` (12×, "of them"). All four are ordinary
+French words one edit away from `novembre`, `mai`, `mai` and `deux`. A similarity-based
+repairer would corrupt 204 correct tokens to fix 8 broken ones.
+
+`[R]` So repair is a **separate, opt-in layer** with an explicit rule table, never applied by
+the number parser itself, and gated on a token being *numeral-shaped*: at least two real
+digits, and every non-digit character drawn from the documented confusable set. A repair is
+only attempted at all when the token contains one of those confusable **letters**, which is
+what keeps `27/06/2008` and `2/3` from being touched. Each rule cites the corpus token that
+motivated it, and a test asserts the guard never fires on any of the ~11k real word tokens
+in the corpus.
+
+#### Ambiguities that remain `[H]`
+
+- `05/01/2005` and the other numeric dates whose two leading components are both ≤ 12 cannot
+  be disambiguated from the string alone. Flagged, not resolved.
+- `200s` is repaired to `2005` by rule, but the rule alone cannot prove the intent — only the
+  surrounding sentence (`augmentation de capital intervenue le 17 mai 200s`) and the
+  corroborating `17/05/2005` elsewhere do. The repair layer therefore reports what it changed
+  so the caller can carry the caveat forward.
+- A bare spelled year such as `deux mille dix` is a *year*, not a date. The parser returns it
+  as a year and refuses to manufacture a day or month.
+
 ---
 
 ## 12. External Sources
