@@ -81,6 +81,20 @@ assume A4.
 `tools/bbox_viewer.py`, which is the reference behaviour — if ours ever disagrees with it,
 stop and investigate rather than "fixing" either side.
 
+Two known, investigated divergences from the reference, both documented in `ground.py` and
+in DISCOVERY.md §7.1:
+
+- **Clamping.** 8 of 11 254 OCR lines have polygons that spill past the page edge by up to
+  8.5e-5 (marginalia and signature strokes). `results.schema.json` requires `0 <= v <= 1`,
+  so an unclamped box makes the submission invalid; `bbox_viewer` does not clamp. We clamp,
+  but only within a 0.001 tolerance — beyond that it is a wrong page size and still raises.
+- **Rounding order.** `300/72` is not binary-representable, so the reference's
+  multiply-then-divide rounds twice. We compute over rationals and round once. Difference:
+  2.22e-16, affecting the 4th decimal of 20 of 45 016 coordinates. `REFERENCE_FLOAT` mode
+  reproduces the reference exactly, and the tests assert it across the whole corpus.
+
+Neither divergence may be widened without a documented reason.
+
 ## Corpus facts worth not re-deriving
 
 - All 17 actes have complete OCR (293/293 pages). There are **no OCR gaps** for this company.

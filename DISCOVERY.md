@@ -554,6 +554,37 @@ values. The conversion is settled; no guesswork remains here.
 Page height/width must come from **that page's** `page.rect` (`doc[page-1]`), because
 `polygon_to_norm` is page-relative and sizes differ across documents.
 
+#### Two findings from implementing this (`archean/ground.py`)
+
+**`[F]` The reference tool can emit a box that the schema rejects.** 8 of the 11 254 OCR
+lines in this corpus (0.07%) have polygons that extend just past the page edge — at most
+`8.5e-5` of a page dimension, roughly 0.02 mm. They are all marginalia: initials, paraphs
+and signature strokes written in the margins. `results.schema.json` constrains every bbox
+value with `minimum: 0, maximum: 1`, so a raw value of `1.00008` makes the **whole
+submission invalid**, and the brief says a file they cannot parse cannot be scored.
+`bbox_viewer.py` does not clamp.
+
+`[R]` So `polygon_to_bbox` clamps by default, but only within a `0.001` tolerance — enough
+to absorb OCR jitter at a page edge, far too little to hide a wrong page size, which is out
+by percent. Beyond the tolerance it still raises. `clamp=False` reproduces the raw reference
+behaviour and is what the compatibility tests compare against. `tests/test_bbox.py` pins the
+count at exactly 8, so if the corpus or the conversion changes, that is noticed rather than
+absorbed silently.
+
+**`[F]` Rounding order changes the fourth decimal on 20 coordinates.** `300/72 = 25/6` is
+not representable in binary. `bbox_viewer` computes `w_px = page_w_pt * scale` and *then*
+divides, which rounds twice. Computing the same quantity over rationals and rounding once
+differs by at most `2.22e-16` — but on 20 of the 45 016 coordinate values in the corpus
+(0.04%) the true value lands on an exact 4-decimal tie, e.g. `0.70125`, where the
+double-rounded path yields `0.7012499999999999` and rounds *down* to `0.7012`, while the
+exact path gives `0.7013`.
+
+`[R]` The module computes in exact rational arithmetic and rounds once, at emit time, and
+keeps a `REFERENCE_FLOAT` mode that reproduces `bbox_viewer` bit-for-bit so compatibility is
+asserted over all 11 254 lines rather than assumed. The practical difference is ~0.02 mm and
+matters to nobody; documenting it costs nothing and means the discrepancy was understood now
+rather than discovered later as a mystery.
+
 ### 7.2 Preventing invented boxes — the LLM must not produce coordinates
 
 `[R]` **Strongly endorse the approach you proposed**, tightened into a hard contract:
