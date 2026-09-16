@@ -107,6 +107,30 @@ Neither divergence may be widened without a documented reason.
 - Numbers are often written twice, as French words and as digits (`trente sept mille
   (37.000)`). Where OCR corrupts the digits, the words usually survive. Prefer agreement
   between the two; treat disagreement as a signal, not a nuisance.
+- Two documents have no `typeRdd` field at all: `…257ec4` (2006-01-03) and `6936b416…`
+  (2025-12-02, which has a different meta shape entirely — `typeDocument`/`numNat`/`libelle`
+  instead). `archean/corpus.py` surfaces both as a `no_type_rdd` finding.
+- `…257ec8`/`…257ec9` (2010-12-08) and `…257eca`/`…257ecb` (2011-07-11) are two pairs of
+  documents sharing one `numChrono` — one registry deposit split into two files, not two
+  separate events. `archean/corpus.py` flags this as `shared_num_chrono`; do not double-count.
+- 10 of 293 OCR pages carry an internal `_reocr_*` diagnostic block outside the documented
+  `{page, ocr, layout}` shape — always a single-character margin correction, never inside body
+  text. Not used by anything; ignore it rather than parsing it.
+- Zero orphaned files, zero malformed filenames, and zero partial-per-document OCR coverage
+  exist anywhere in the whole shipped corpus (all 20 companies, both doctypes) — verified by
+  direct comparison, not sampled. `corpus.py`'s error paths for those cases are real code with
+  no real trigger; they are tested through fixtures, not through this corpus.
+
+## Corpus indexing
+
+`archean/corpus.py` turns a `{pdf,meta,ocr}` folder into a typed, deterministic `Corpus` of
+`Document`/`Page` objects — what exists and how files relate, never what a document says. It
+raises on contract violations (orphan files, id mismatches, page-numbering conflicts — none of
+which occur in the real corpus) and records real-but-benign facts as non-fatal `Finding`s
+(`no_ocr`, `no_type_rdd`, `shared_num_chrono`, `partial_ocr_coverage`,
+`deposit_date_differs_from_filename`). `scripts/inventory.py` renders a `Corpus` into the
+reproducible half of DISCOVERY.md §4.1 — everything except "capital in header" and "priority",
+which need document content and stay hand-verified. See DISCOVERY.md §4.1-V.
 
 ## Commands
 
@@ -115,6 +139,10 @@ All verified to run from this directory.
 ```bash
 # run the test suite
 python -m pytest -q
+
+# regenerate the reproducible half of DISCOVERY.md §4.1 from the corpus
+python scripts/inventory.py
+python scripts/inventory.py --root path/to/data/<siren>/actes --format json
 
 # where does a phrase sit on a page, in submittable coordinates?
 python ../engineering-challenges/tools/bbox_viewer.py \
