@@ -906,6 +906,222 @@ spot that content reading closes with high confidence. `8925` is not a gap at al
 as itself a signal of importance would have been wrong for one of the two documents it was
 built to handle.
 
+### 8.5 Cross-corpus validation — what generalised and what did not
+
+§8.4 measured candidate phrases against ARCHEAN's 17 documents. This section
+re-measures them against all 115 OCR'd acte documents across the 20 companies
+(`scripts/validate_routing.py`). Several §8.4 conclusions did not survive.
+
+#### The measurable universe, and its hard limit
+
+`[F]` 115 of 177 acte documents have OCR: **17 ARCHEAN, 98 across 16 other sirens**.
+`[F]` Of those 115, only **79 carry a `typeRdd` at all — 36 do not (31%)**. ARCHEAN
+contributed 2 of those 36; the rest are spread across 10 other companies.
+
+`[F]` **ARCHEAN is the only company in this corpus with a trustworthy label.** Its gold
+set comes from `tests/golden_capital_chain.json` plus content read directly. The other 19
+companies have only `typeRdd`, which §8.4 proved is not reliably scoped to its own PDF.
+`[R]` So `validate_routing.py` never reports accuracy outside ARCHEAN. It reports
+*prevalence* (no label needed), *agreement with typeRdd* (explicitly not accuracy), and
+real TP/FP/FN/TN only where gold exists. Conflating those three would manufacture
+confidence the corpus cannot support.
+
+#### Signals that did not generalise
+
+`[F]` **`protocole de cession` and `nouvel actionnaire` fire in exactly zero of the other
+16 companies.** In §8.4 both had FP=0 against ARCHEAN's gold and read as clean
+`share_transfer` signals. They describe ARCHEAN's drafting, not a corpus-wide pattern.
+`[F]` `ordres de mouvement` fires in one other company. `[R]` None of the three is a
+validated cross-corpus signal; §8.4's FP=0 for them was a statement about 17 documents.
+
+`[F]` **Broad firing is not validation.** `ordre de mouvement` (singular) fires in 7 other
+companies — because it is the statutory transmission clause ("la cession s'opère par un
+ordre de mouvement signé du cédant"), present whether or not any transfer occurred. In
+ARCHEAN it fires in 6 documents and **not** in `…ec2`, the one document that actually
+records the 2005 cessions. A signal can generalise as boilerplate.
+
+`[F]` **A legal-form vocabulary split invalidates ARCHEAN-derived vocabulary for half the
+corpus.** ARCHEAN is a SAS and speaks of `actions`; `parts sociales` fires in 38 documents
+across 12 other companies and in **zero** ARCHEAN documents. `cession de parts` fires in 19
+documents across 7 companies, none of them ARCHEAN. `[R]` Any signal set derived from
+ARCHEAN alone is structurally blind to the SARL half of the corpus.
+
+#### A signal that did generalise
+
+`[F]` `pour le porter de` had TP=1, FN=6 in ARCHEAN — §8.4 called it precise but nearly
+useless. Across the 79 typeRdd-bearing documents it fires on 8 and **disagrees with
+`typeRdd` zero times** (TP=8, FP=0, FN=8), firing in 9 companies. `[I]` Its low recall is
+real and unchanged; its precision is now corroborated well beyond ARCHEAN.
+
+#### The recital problem — the pivotal finding
+
+`[F]` **Updated statutes recite the company's entire capital history, with amounts and
+transition verbs.** `…7ebd` is a 2013 *address-change* filing; its attached statutes
+contain `"augmenté de 113.000 euros afin d'être porté à 150.000 euros"` and two more like
+it, for operations from 2005 and 2008. It is **lexically indistinguishable** from an
+operative capital acte. The same holds for `…7ec9` and `…7ecb`.
+
+`[F]` This is why no bare phrase rule reached FP=0 in §8.4, and it is not a tuning
+failure. Measured on ARCHEAN's gold: `transition + amount` on one line gives TP=5, FP=3,
+FN=2, TN=7 — and the three FPs are exactly those three statutes reprints.
+
+`[F]` **Excluding recitals removes every false positive.** A transition+amount line
+introduced by `"aux termes de"` (on that line or the one before) is a recital. Excluding
+them: **TP=5, FP=0, FN=2, TN=10**.
+
+`[F]` **But that exclusion is ARCHEAN-shaped and has a measured gap.** HADEAN opens its
+recital differently — `"Lors de l'augmentation de capital décidée par l'assemblée générale
+extraordinaire du 30 avril 2008 :"` followed by a bulleted history — which `"aux termes
+de"` does not catch. Outside ARCHEAN the backref rule disagrees with `typeRdd` on 4
+documents, three of which (`9133`, `9134`, and `5421`) are recitals of this second form.
+
+`[F]` **A date-based generalisation covers both forms.** What every recital shares is that
+it *cites a year earlier than the document's own*, while an operative resolution is dated
+now. Using `archean.frenchnum.parse_french_date_parts` (already validated in §11.1) to look
+for an earlier year within three lines: ARCHEAN gold is unchanged at **TP=5, FP=0, FN=2,
+TN=10**, and it additionally excludes HADEAN's `9133`/`9134` while keeping `9139`, HADEAN's
+genuine 2022 reduction (`"réduire le capital de 59 900 euros, pour le ramener de 578 450
+euros à 518 550 euros"`). Cross-corpus disagreement with `typeRdd` drops from 4 documents
+to 1.
+
+`[I]` The one remaining disagreement, `9139`, looks like a `typeRdd` gap rather than a rule
+error — its `typeRdd` says only `"sous condition suspensive"` while the text states an
+operative reduction. `[H]` Not asserted: without a gold label for HADEAN there is no basis
+to declare which source is wrong, so it is recorded as a conflict. `[F]` The date rule is
+**more conservative, not strictly better**: outside ARCHEAN it has more false negatives
+than the backref rule (5 vs 2 against `typeRdd`). That trade-off is real and unresolved.
+
+#### Context scope — measured, not assumed
+
+`[F]` A capital topic phrase co-occurring with a euro amount, against ARCHEAN's gold:
+
+| scope | TP | FP | FN | TN |
+|---|--:|--:|--:|--:|
+| same line | 7 | 3 | 0 | 7 |
+| adjacent line | 7 | 3 | 0 | 7 |
+| same page | 7 | 3 | 0 | 7 |
+| whole document | 7 | **6** | 0 | 4 |
+
+`[F]` Line, adjacent and page scopes are **identical**; document scope is strictly worse.
+`[R]` So page-level co-occurrence is necessary and document-level presence is not
+sufficient — but there is no measured reason to go tighter than page, and no measured
+reason for bounding-box reasoning in routing at all. §8.4's separate finding that 41
+occurrences are only visible when adjacent lines are joined still stands for *bare phrase
+presence*; it does not change any contingency here.
+
+#### Our own gold labels encode hindsight
+
+`[F]` `…7ebf` (2017 reduction *authorised*, later realised) is gold-positive. `…7ec8` (2010
+delegation authorising the president to increase capital, never exercised) is not. Both are
+authorisations; the distinction is whether the authorisation was later acted on. `[R]` That
+is **not knowable from the document itself**, and no content-based router can reproduce it.
+The two gold false negatives (`…7ec5`, a constitution stating an initial capital with no
+transition; `…7ebf`, authorising a maximum with no realised transition) are separate
+mechanisms, not tuning failures — they need their own signals, not a loosened threshold.
+
+#### The unlabelled population is systemic
+
+`[F]` Of the 36 OCR'd documents with no `typeRdd`: **6 show operative capital text**, 20
+mention a cession, 15 show neither. The 6 span at least three companies and include
+ARCHEAN's `…ec4` and HADEAN's `9136`/`9137` (the 2008 apport-en-nature increases, directly
+relevant to the ARCHEAN group story). `[F]` `8925` still shows nothing, unchanged.
+
+`[R]` **`typeRdd` cannot be a primary routing input.** It is absent on 31% of OCR'd
+documents, misattributed in at least one measured case, and silent on 6 documents that
+contain operative capital text. It remains useful as a *corroborating* input.
+
+#### Conflicts, recorded rather than resolved
+
+`[F]` Among the 79 labelled documents, disagreements run in both directions: 4 where
+`typeRdd` says capital and no operative capital text is found (2 in other companies, 2 in
+ARCHEAN), and 4 where operative capital text is found and `typeRdd` does not say capital
+(all outside ARCHEAN). `[R]` Neither direction is declared the error. Reading each document
+to correct its label would make the label circular — the exact failure mode this project
+has avoided since §8.4.
+
+### 8.6 Proposed classification contract for `route.py` — specification only
+
+`route.py` is **not** implemented, and the evidence above says it should not yet be. What
+follows is the contract the measurements justify, plus the open questions that still block
+a confident implementation.
+
+```python
+@dataclass(frozen=True)
+class Evidence:
+    """One place a signal fired. Everything needed to go and look at it."""
+    signal: str          # the rule that fired, e.g. "operative-capital"
+    page: int            # 1-indexed, matches corpus.Page.number
+    line_index: int      # index within that page's ocr[] array
+    text: str            # verbatim OCR line, never folded or repaired
+    scope: str           # "line" | "page" — the scope at which it fired
+
+class Verdict(enum.Enum):
+    OPERATIVE   = "operative"    # signals fired and survived recital exclusion
+    RECITAL     = "recital"      # capital text present, all of it back-referenced
+    MENTION     = "mention"      # topic present, no transition and no amount
+    SILENT      = "silent"       # no capital/transfer signal at all
+
+@dataclass(frozen=True)
+class Classification:
+    mechanism: str               # "capital_amount" | "share_transfer"
+    verdict: Verdict
+    evidence: tuple[Evidence, ...]          # why — never empty unless SILENT
+    suppressed: tuple[Evidence, ...]        # recital lines excluded, kept for audit
+    metadata_label: bool | None             # what typeRdd said; None if absent
+    conflicts_with_metadata: bool
+```
+
+Why these fields and not others, each traceable to a measurement above:
+
+- **`evidence` is mandatory and non-empty for any non-SILENT verdict.** §8.5's usable rule
+  is a conjunction over specific lines; a router that returned `"capital"` without them
+  could not be audited, and the `…7ebd` case shows the lines are exactly what distinguishes
+  a real event from a statutes reprint.
+- **`suppressed` exists because recital exclusion is known-incomplete.** The `"aux termes
+  de"` form was found first and the `"Lors de … du <date>"` form only appeared when HADEAN
+  was measured. Keeping the excluded lines lets a reviewer see what was thrown away rather
+  than trusting the filter.
+- **`scope` is `line` or `page` only.** Measured: line, adjacent and page are equivalent,
+  document is strictly worse. There is no measured justification for a bbox-level field.
+- **`metadata_label` is nullable and separate from the verdict.** 31% of OCR'd documents
+  have no `typeRdd`; it is recorded alongside the content verdict, never merged into it.
+- **`conflicts_with_metadata` is surfaced, not resolved** — §8.5's conflicts run both ways
+  and this project has no basis to adjudicate them.
+- **No score, no weight, no confidence float.** Every rule measured here is boolean and
+  §12's instruction stands: a score would need a derivation, a validation and a
+  conflict policy that the evidence does not currently supply.
+
+**Unknown / ambiguity policy**, in the terms the measurements support:
+
+| situation | verdict | why |
+|---|---|---|
+| transition + amount, no earlier date nearby | `OPERATIVE` | TP=5 FP=0 on gold |
+| transition + amount, all back-referenced or earlier-dated | `RECITAL` | the `…7ebd` class |
+| topic + amount but no transition construction | `MENTION` | catches `…7ec5` (constitution) and `…7ebf` (authorised maximum) — both real events the transition rule misses, so they must not be silently dropped |
+| no capital/transfer signal | `SILENT` | `8925`, verified across twelve probes |
+| `typeRdd` present and disagrees with the verdict | any verdict + `conflicts_with_metadata=True` | never auto-resolved |
+
+`[R]` `MENTION` is doing real work here: it is where the two gold false negatives land. A
+router must not collapse it into `SILENT`, or it would drop a constitution and an
+authorised reduction — both genuine capital events.
+
+#### What still blocks implementation
+
+1. `[U]` **Recital exclusion is not proven complete.** Two surface forms are known. There
+   is no evidence about how many more exist, and no gold outside ARCHEAN to find them with.
+2. `[U]` **`share_transfer` has no validated cross-corpus signal.** Its three precise
+   ARCHEAN signals fire nowhere else; `cession` alone has FP=10 of 15 in ARCHEAN; the
+   SAS/SARL vocabulary split means `cession de parts` and `cession d'actions` need separate
+   treatment that has not been measured against any gold.
+3. `[U]` **Constitution and authorisation mechanisms have no measured signal at all** —
+   they are currently only reachable as `MENTION`.
+4. `[U]` **The date-vs-backref trade-off is unresolved** — the date rule is more
+   conservative outside ARCHEAN and there is no gold there to say which is right.
+
+`[R]` Items 2 and 3 are the ones worth attacking next, and both need the same thing: a
+second hand-verified gold set, on a company other than ARCHEAN. Without it, cross-corpus
+work can only measure agreement, never correctness.
+
 ---
 
 ## 9. LLM Strategy — the division of labour

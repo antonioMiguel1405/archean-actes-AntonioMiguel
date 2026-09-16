@@ -140,6 +140,30 @@ across all 20 companies) and prints raw TP/FP/FN/TN — never a score, never a r
 routing decision. See DISCOVERY.md §8.4 before adding a candidate phrase or trusting one already
 there; the table is dated and was produced by a specific command, not asserted from memory.
 
+`scripts/validate_routing.py` re-measures those signals across all 20 companies. It reports
+prevalence (no label), agreement-with-`typeRdd` (never called accuracy), and real
+TP/FP/FN/TN only for ARCHEAN, the one company with a gold label. See DISCOVERY.md §8.5 and
+the proposed classification contract in §8.6.
+
+Cross-corpus facts that overturned earlier conclusions:
+- **`protocole de cession` and `nouvel actionnaire` fire in zero other companies.** They had
+  FP=0 in ARCHEAN and are not cross-corpus signals at all.
+- **Broad firing is not validation.** `ordre de mouvement` (singular) fires in 7 companies
+  because it is the statutory transmission clause — it does not fire in `…ec2`, the one
+  ARCHEAN document that records actual cessions.
+- **SAS/SARL vocabulary split:** `parts sociales` fires in 38 documents, 0 of them ARCHEAN.
+  Signals derived from ARCHEAN are blind to the SARL half of the corpus.
+- **Updated statutes recite the whole capital history with amounts.** `…7ebd`, a 2013
+  address-change filing, is lexically indistinguishable from a capital acte. Excluding
+  recitals is what gets FP to 0; recitals have at least two surface forms (`aux termes de`,
+  and `Lors de … du <date>`), and identifying them by *a cited year earlier than the
+  document's own* covers both.
+- **`typeRdd` is absent on 31% of OCR'd documents (36 of 115)**, and 6 of those 36 contain
+  operative capital text. It cannot be a primary routing input; it corroborates.
+- **Our own gold labels encode hindsight** — `…7ebf` (authorisation later realised) is
+  gold-positive, `…7ec8` (authorisation never exercised) is not. No router can reproduce
+  that distinction from the document.
+
 Facts worth not re-discovering:
 - **`typeRdd` is not reliably scoped to its own PDF.** `…ec2`'s `typeRdd` claims "Augmentation
   du capital social"; its OCR text has none. The real augmentation is in the adjacently-filed
