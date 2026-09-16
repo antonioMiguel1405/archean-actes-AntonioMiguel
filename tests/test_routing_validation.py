@@ -422,11 +422,17 @@ def test_results_are_integer_counts_not_scores(archean):
         assert isinstance(has_operative_capital_text_by_date(doc), bool)
 
 
-def test_route_py_still_does_not_exist():
-    """This step, like the last one, must not produce the router."""
-    assert not (
-        Path(__file__).resolve().parent.parent / "archean" / "route.py"
-    ).exists()
+def test_route_py_exists_and_is_the_designated_next_step():
+    """This validation step, like the discovery step before it, was scoped
+    not to produce the router — cross-corpus measurement had to come first.
+    That boundary has since moved on purpose: route.py now exists, built on
+    exactly the contract (§8.6) and measurements (§8.3-§8.5) this file
+    tests. Its own behaviour is covered in tests/test_route.py; this
+    assertion only confirms the file is where the classification contract
+    said it would go, not a re-litigation of whether it should exist.
+    """
+    route_py = Path(__file__).resolve().parent.parent / "archean" / "route.py"
+    assert route_py.exists()
 
 
 # ===========================================================================

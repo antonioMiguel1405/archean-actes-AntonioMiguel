@@ -522,11 +522,18 @@ def test_no_route_function_exists_in_this_module():
     assert not hasattr(analyze_routing, "classify_document")
 
 
-def test_route_py_does_not_exist_yet():
+def test_route_py_exists_now_and_is_tested_in_test_route_py():
+    """This step (routing evidence discovery) was scoped not to create
+    route.py, and a version of this test once asserted its absence. A later
+    step (cross-corpus validation, then the router itself) was explicitly
+    the point at which route.py was allowed to exist — see
+    tests/test_routing_validation.py and tests/test_route.py, which took
+    over the "not yet" guard and then the router's own tests respectively.
+    This file's job now is only to confirm the boundary moved on purpose,
+    not to keep re-asserting an absence that would make it stale.
+    """
     route_py = Path(__file__).resolve().parent.parent / "archean" / "route.py"
-    assert not route_py.exists(), (
-        "route.py appeared — this task was explicitly scoped to not create it"
-    )
+    assert route_py.exists()
 
 
 # ===========================================================================

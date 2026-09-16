@@ -132,9 +132,34 @@ which occur in the real corpus) and records real-but-benign facts as non-fatal `
 reproducible half of DISCOVERY.md §4.1 — everything except "capital in header" and "priority",
 which need document content and stay hand-verified. See DISCOVERY.md §4.1-V.
 
+## `archean/route.py` — the router
+
+`classify(document, mechanism) -> Classification` and `classify_document(document) ->
+tuple[Classification, ...]` (one per `KNOWN_MECHANISMS = ("capital_amount",
+"share_transfer")` — `…ec7` is gold-positive for both, which is why it's a tuple, not a
+single result per document). Built on DISCOVERY.md §8.6's contract; two contract
+ambiguities and one new measurement from building it are in §8.7 — read that before
+touching the recital window, the MENTION condition, or the mechanism list.
+
+Rules never invented beyond what §8.3–§8.6 measured:
+- `capital_amount` can reach `OPERATIVE` (transition + amount, line-scoped, recital-excluded
+  via both discovered surface forms — `aux termes de` and a cited year earlier than the
+  document's own, checked in a **line-local window, not page-wide** — widening it to
+  page-wide was tested and made it *worse*, TP dropping from 5 to 3 on ARCHEAN gold).
+- `share_transfer` can **only** reach `MENTION` or `SILENT` — no signal for it survived
+  cross-corpus measurement (§8.5), so `OPERATIVE` is structurally unreachable for it, not
+  merely untriggered. Don't add `protocole de cession` / `nouvel actionnaire` / `ordre(s) de
+  mouvement` back as topic signals — they were excluded on evidence, not by omission.
+- `typeRdd` is exposed as `metadata_label` (`None` when absent) and compared via
+  `conflicts_with_metadata`, never substituted for content. A conflict is reported, never
+  resolved — see `…ec2` (metadata says capital, content says no) and `…7ebf` (metadata says
+  capital, content is `MENTION` not `OPERATIVE` — a known ceiling, not a bug).
+- No `if doc.doc_id == "...":` anywhere — verified by an AST-based test, not a text scan
+  (the module's own docstring quotes that exact forbidden pattern as an example).
+
 ## Routing evidence — not routing itself
 
-`route.py` does not exist yet. `scripts/analyze_routing.py` measures candidate phrases against
+`scripts/analyze_routing.py` measures candidate phrases against
 two label sources (ARCHEAN's own 17 hand-verified documents; a noisy `typeRdd`-derived label
 across all 20 companies) and prints raw TP/FP/FN/TN — never a score, never a ranking, never a
 routing decision. See DISCOVERY.md §8.4 before adding a candidate phrase or trusting one already

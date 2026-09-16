@@ -1122,6 +1122,66 @@ authorised reduction — both genuine capital events.
 second hand-verified gold set, on a company other than ARCHEAN. Without it, cross-corpus
 work can only measure agreement, never correctness.
 
+### 8.7 `archean/route.py` — implementation notes
+
+`route.py` now exists, built on §8.6's contract. Two ambiguities in that contract had to be
+resolved against evidence before code could be written, plus one new fact surfaced only by
+testing the implementation.
+
+**`[R]` `Classification.mechanism` is one field, but `…ec7` is gold-positive for both
+mechanisms.** §8.6 sketched a single `Classification` per document. ARCHEAN's own gold set
+(§8.4) has `…ec7` in both `capital_amount` and `share_transfer`. `classify(document,
+mechanism) -> Classification` takes the mechanism explicitly; `classify_document(document)
+-> tuple[Classification, ...]` calls it once per `KNOWN_MECHANISMS` entry, in a fixed order.
+This is an extension of §8.6, not a contradiction of it — the single-mechanism
+`Classification` shape is unchanged, there is just more than one per document.
+
+**`[F]` The `Verdict.MENTION` policy table and its own inline enum comment disagreed, and
+the table was right.** The comment read *"topic present, no transition and no amount"*; the
+table read *"topic + amount, no transition"* and cited the two gold false negatives as the
+motivating cases. Reading both documents directly settled it: `…7ec5`'s constitution states
+`"37 000 euros"` as its capital on the same page as the topic phrase (topic **and** amount,
+no transition verb); `…7ebf` authorises `"un montant maximum de 150 861 euros"` (topic
+**and** amount, no transition verb either). Both match the table's row exactly.
+
+`[R]` Despite that, the implementation does **not** require amount as a precondition for
+MENTION — it fires whenever the topic phrase is present at all and the document is not
+OPERATIVE. This is a deliberate widening, not a discovery: `…ec6` and `…ec1` (the CAC
+reports on preference-share economics) discuss the capital topic extensively with no stated
+euro amount anywhere near it, and forcing them to `SILENT` would mean dropping evidence
+that is plainly about the mechanism, which conflicts with the standing instruction not to
+force `SILENT` when relevant evidence exists. Recorded as an engineering choice, not a
+corpus fact.
+
+**`[F]` Widening recital detection from line-local to page-wide was measured and found
+worse, not equivalent — a new, non-obvious result.** §8.5's earlier "scope" measurement
+found line/adjacent/page equivalent for the *topic+amount co-occurrence* test (used by
+MENTION). That equivalence does **not** transfer to the recital-exclusion test used by
+OPERATIVE. Tested directly: on ARCHEAN gold, checking for an earlier-dated line within a
+line-local window gives **TP=5, FP=0, FN=2, TN=10** (matching §8.5's committed result);
+widening the same date check to "anywhere on the page" gives **TP=3, FP=0, FN=4, TN=10** —
+two additional false negatives, because a page-wide search suppresses genuinely operative
+lines that merely share a page with an unrelated older date (a registration stamp, a
+signature block, a cross-reference). `[R]` `route.py`'s recital check stays line-local
+(`_RECITAL_WINDOW = 3` lines, same page only); the topic+amount co-occurrence that *is*
+page-scope-equivalent is not implemented as a MENTION precondition at all, per the previous
+paragraph, so no rule in this module currently exercises the page-wide case.
+
+**`[F]` A previously un-inspected edge case in the transition rule.** `…7ec7` page 5
+contains a ninth AGE resolution — *"approuve le principe d'une augmentation de capital de
+100.000 euros (plus une prime d'émission), au profit d'un ou plusieurs nouveaux actionnaires
+à définir"*, with a mandate given to the president to go find those shareholders. This
+matches `TRANSITION` + `AMOUNT` exactly as the real, decided increase on page 3 of the same
+document does, despite describing an **approved principle for a future operation**, not a
+decided and executed one. `[F]` This line was already included in the exact rule validated
+as TP=5/FP=0 in the cross-corpus step — it is not a regression introduced by writing
+`route.py`, only a granularity nobody had looked at closely until building the tests forced
+a line-by-line check of the evidence. `[R]` Not patched: `…7ec7`'s document-level verdict is
+unaffected (page 3 alone makes it `OPERATIVE`), and narrowing the regex to exclude
+"approuve le principe de" has no cross-corpus measurement behind it. Recorded as a known
+limitation and pinned as a regression test (`test_known_limitation_transition_rule_also_matches_an_approved_principle`)
+rather than silently fixed.
+
 ---
 
 ## 9. LLM Strategy — the division of labour
