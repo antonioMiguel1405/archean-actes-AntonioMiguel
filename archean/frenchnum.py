@@ -411,6 +411,30 @@ _DAY_MONTH: Final[re.Pattern[str]] = re.compile(
 )
 
 
+def _validate_calendar_date(parts: DateParts, source: str) -> None:
+    """Confirm a complete ``DateParts`` names a real calendar date.
+
+    ``DateParts.to_date()`` calls the stdlib ``datetime.date`` constructor,
+    which raises a bare ``ValueError`` for an impossible day (0, or 31 in a
+    30-day month) — not this module's own ``FrenchDateError``. Every other
+    rejection in this module raises ``FrenchDateError``, and a caller that
+    only catches that (as ``archean.route._cites_earlier_year`` originally
+    did) would see an unhandled ``ValueError`` instead. Found by running
+    ``parse_french_date_parts`` over the whole corpus (DISCOVERY.md 8.9): an
+    OCR-split registration stamp, ``"3 0 MAI 2012"`` (day "30" broken into
+    "3" and "0" by a space), lets ``_DAY_MONTH_YEAR`` capture day=0.
+
+    ``FrenchDateError`` is itself a ``ValueError`` subclass, so re-raising as
+    ``FrenchDateError`` here does not narrow what any existing caller catches
+    — it only makes the module's own documented contract ("this module
+    raises ``FrenchDateError``") actually true everywhere.
+    """
+    try:
+        parts.to_date()
+    except ValueError as exc:
+        raise FrenchDateError(f"{source!r}: {exc}") from exc
+
+
 def parse_french_date_parts(text: str) -> DateParts:
     """Extract whatever date information a string states. Never invents.
 
@@ -447,7 +471,7 @@ def parse_french_date_parts(text: str) -> DateParts:
         parts = DateParts(
             day=a, month=b, year=year, day_month_ambiguous=(a <= 12)
         )
-        parts.to_date()  # rejects 31/02
+        _validate_calendar_date(parts, text)  # rejects 31/02
         return parts
 
     # -- numeric day + month word + numeric year ------------------------
@@ -458,7 +482,7 @@ def parse_french_date_parts(text: str) -> DateParts:
             month=_MONTHS[m.group(2)],
             year=int(m.group(3)),
         )
-        parts.to_date()
+        _validate_calendar_date(parts, text)
         return parts
 
     # -- fully or partly spelled ----------------------------------------
@@ -476,7 +500,7 @@ def parse_french_date_parts(text: str) -> DateParts:
         year = _trailing_year(after)
         parts = DateParts(day=day, month=month, year=year)
         if parts.is_complete:
-            parts.to_date()
+            _validate_calendar_date(parts, text)
         return parts
 
     # -- numeric day + month word, no year ------------------------------
@@ -484,8 +508,8 @@ def parse_french_date_parts(text: str) -> DateParts:
     if m:
         return DateParts(day=int(m.group(1)), month=_MONTHS[m.group(2)])
 
-    # -- a bare year, spelled or not ------------------------------------
-    year = _trailing_year(folded)
+    # -- a bare year, spelled or not, but only when explicitly marked ---
+    year = _bare_year_if_marked(folded)
     if year is not None:
         return DateParts(year=year)
 
@@ -509,7 +533,14 @@ def _spelled_day(before: str) -> int | None:
 
 
 def _trailing_year(after: str) -> int | None:
-    """Read a year from the words after a month name, if one is stated."""
+    """Read a year from the words after a month name, if one is stated.
+
+    Only called where a genuine date-shaped anchor already precedes ``after``
+    in the caller — a month word (from the "fully or partly spelled" branch
+    of :func:`parse_french_date_parts`) or the ``l'an`` marker (from
+    :func:`_bare_year_if_marked`). Never called on an arbitrary, unanchored
+    line — see that function's docstring for why that distinction matters.
+    """
     tail = after.strip().strip(",.").strip()
     if not tail:
         return None
@@ -526,6 +557,52 @@ def _trailing_year(after: str) -> int | None:
         if value is not None and 1000 <= value <= 2999:
             return value
     return None
+
+
+#: The marker that introduces a genuine bare-year preamble in this corpus:
+#: "L'an deux mille dix-sept," / "L'an 2016," / "l'an deux mille dix-neuf,".
+#: Every existing test of the bare-year fallback (test_a_spelled_year_line_
+#: yields_only_a_year) uses exactly this marker; none uses a bare, unmarked
+#: digit string.
+_LAN_RE: Final[re.Pattern[str]] = re.compile(r"\bl'?an\b")
+
+
+def _bare_year_if_marked(text: str) -> int | None:
+    """A year with no day and no month attached to it — but ONLY when the
+    text explicitly announces itself as a year with ``l'an``.
+
+    This function exists because of a real bug, found by measurement, not
+    designed defensively in advance: :func:`parse_french_date_parts` used to
+    call ``_trailing_year(text)`` on the WHOLE, unanchored line whenever no
+    month word was found anywhere in it. ``_trailing_year`` was written to be
+    called only after a genuine anchor already precedes it (a month word);
+    called on an arbitrary line instead, its bare ``\\b\\d{4}\\b`` regex
+    accepts literally any 4-digit substring as a year.
+
+    Measured against the full 20-company actes corpus (archean/route.py's
+    ``_cites_earlier_year``, called on every OCR line with no month word,
+    reproduced this exact call): 842 lines produced a "bare year". Requiring
+    this ``l'an`` marker keeps 28 of them — every one a genuine ``"L'an
+    <year>,"`` preamble, spanning at least 12 companies — and refuses the
+    other 814, whose false positives fall into three dominant, previously
+    undiscovered classes: statutory article citations (``"l'article 1424 du
+    Code Civil"`` — 151 corpus-wide hits, the single largest source),
+    registry/greffe reference numbers (``"Code greffe : 2104"``,
+    ``"N/REF : 55 B 140 / A-3545"``), and bare amounts (``"Enregistrement :
+    1196 euros"``) — in addition to the share/part counts (``"1766 parts"``,
+    ``"2000 parts nouvelles"``) that surfaced the bug in the first place.
+
+    A weaker marker (the preposition ``en``, as in ``"en 2018"``) was
+    measured and rejected: French ``en`` is also the word used in ``"divisé
+    en 2500 actions"`` (partitive "divided INTO N shares", not "in [year]"),
+    and cannot be told apart from the temporal sense by local context alone
+    without a much larger rule. See DISCOVERY.md 8.9 for the full measurement
+    and the rejected alternative.
+    """
+    m = _LAN_RE.search(text)
+    if not m:
+        return None
+    return _trailing_year(text[m.end():])
 
 
 def parse_french_date(text: str) -> _dt.date:

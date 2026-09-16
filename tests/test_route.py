@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from archean.corpus import load_corpus
+from archean.ground import OcrLine
 from archean.route import (
     CAPITAL_TOPIC,
     KNOWN_MECHANISMS,
@@ -22,6 +23,7 @@ from archean.route import (
     Classification,
     Evidence,
     Verdict,
+    _cites_earlier_year,
     _phrase_pattern,
     classify,
     classify_document,
@@ -217,17 +219,108 @@ def test_backref_recital_form_is_detected(archean):
     assert any("aux termes" in ev.text.lower() or True for ev in result.evidence)
 
 
-def test_date_based_recital_form_is_detected(hadean):
-    """HADEAN's second recital opener: 'Lors de l'augmentation de capital
-    décidée par l'assemblée générale extraordinaire du 30 avril 2008 :' —
-    a construction 'aux termes de' does not match.
+def test_known_limitation_date_recital_is_missed_when_ocr_splits_the_date(hadean):
+    """…9133 IS a recital, and the date rule no longer catches it.
+
+    HADEAN's second recital opener is "Lors de l'augmentation de capital
+    décidée par l'assemblée générale extraordinaire du 30 avril 2008 :" —
+    "aux termes de" does not match it, and the date rule was introduced
+    (DISCOVERY.md §8.5) precisely to cover it.
+
+    But this page's OCR breaks that date across two lines:
+
+        210: "... extraordinaire du 30 avril"
+        211: "2008 :"
+
+    and every date parse in this module is line-local. Line 210 yields
+    day+month with year=None; line 211 is a bare "2008" with no day, no
+    month and no ``l'an`` marker.
+
+    Before DISCOVERY.md §8.9, line 211 was caught anyway — by the same
+    unrestricted bare-year fallback that read JACQUES BOCKEL's share count
+    "1766" as a year and wrongly suppressed two genuine capital increases.
+    It got this document right for a reason that was not a reason: it
+    accepted ANY 4-digit numeral. Fixing that bug necessarily removes the
+    accident along with it.
+
+    The honest state is therefore recorded, not papered over: this is a
+    recital-leakage FALSE NEGATIVE caused by cross-line OCR date splitting —
+    a separate, pre-existing defect that the first bug was masking. Joining
+    adjacent lines before parsing is the fix, and it is deliberately out of
+    scope here: CLAUDE.md already flags line-joining as unvalidated future
+    work, and it needs its own corpus-wide audit. …9134 is the twin filing
+    with the same split (worse: "du 30 a" / "1" / "2008 :").
     """
     d9133 = doc(hadean, "9133")
     result = classify(d9133, "capital_amount")
-    assert result.verdict in (Verdict.RECITAL, Verdict.MENTION), (
-        f"expected the 2008 recital to be excluded from OPERATIVE, got {result.verdict}"
+    assert result.verdict == Verdict.OPERATIVE, (
+        "if this now returns RECITAL/MENTION again, cross-line date joining "
+        "was implemented — update DISCOVERY.md §8.9's remaining-limitations "
+        "list and this test together"
     )
-    assert result.verdict != Verdict.OPERATIVE
+
+
+# ===========================================================================
+# Four-digit numeral / year ambiguity — DISCOVERY.md §8.9
+# ===========================================================================
+
+
+def _line(index, text, page=1):
+    return OcrLine(index=index, page=page, text=text, polygon=(), score=None)
+
+
+def test_a_bare_share_count_is_not_read_as_an_earlier_year():
+    """The bug, isolated at the layer that consumes the parse.
+
+    Real corpus lines, JACQUES BOCKEL SARL (445070311), documents 5420/5426
+    — the second gold set's own company. Both numbers sit in
+    parse_french_year's 1000-2999 "plausible year" range and both are
+    earlier than the 2007 filing year, so before the fix each one made
+    _cites_earlier_year answer True and suppressed a genuine capital
+    increase into RECITAL.
+    """
+    lines = [
+        _line(0, "Cet apport en nature est rémunéré par 1766 parts sociales "
+                 "numérotées de 235 à 2000."),
+        _line(1, "euros par création de 2000 parts nouvelles de 75,00 euros "
+                 "de nominal chacune, émises au pair et à libérer"),
+        _line(2, "Total des parts présentes ou représentées : 2000 parts sur "
+                 "les 2000 parts composants le capital social."),
+    ]
+    for index in range(len(lines)):
+        assert not _cites_earlier_year(lines, index, 2007)
+
+
+def test_a_genuine_earlier_year_is_still_read_as_one():
+    """The other half of the same contract: the fix must not cost real
+    recital detection. All three forms the corpus actually uses.
+    """
+    full_date = [_line(0, "Aux termes de l'assemblée générale extraordinaire "
+                          "du 30 avril 2008,")]
+    assert _cites_earlier_year(full_date, 0, 2019)
+
+    numeric = [_line(0, "enregistré le 27/06/2008")]
+    assert _cites_earlier_year(numeric, 0, 2019)
+
+    spelled = [_line(0, "L'an deux mille huit,")]
+    assert _cites_earlier_year(spelled, 0, 2019)
+
+
+def test_a_year_that_is_not_earlier_does_not_suppress():
+    """A resolution dated now is not a recital of itself."""
+    same_year = [_line(0, "Le 30 avril 2008,")]
+    assert not _cites_earlier_year(same_year, 0, 2008)
+
+
+def test_an_ocr_split_registration_stamp_does_not_crash_the_recital_check():
+    """"3 0 MAI 2012" (day "30" broken by a space) parses to day=0, which the
+    stdlib date constructor rejects. It used to escape as a bare ValueError
+    that this function did not catch — a crash, not a misclassification.
+    Real corpus line: 63e8c25c7e898005f51aaa52 page 1; "2 0 AOUT 2007" in
+    445070311's 5420/5426.
+    """
+    for stamp in ("3 0 MAI 2012", "2 0 AOUT 2007"):
+        assert _cites_earlier_year([_line(0, stamp)], 0, 2019) is False
 
 
 def test_hadean_genuine_2022_reduction_is_not_suppressed(hadean):

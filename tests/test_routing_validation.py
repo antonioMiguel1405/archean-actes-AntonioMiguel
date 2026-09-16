@@ -243,49 +243,76 @@ def test_backref_recital_detection_has_a_known_gap_outside_archean(by_short_id):
     "Lors de l'augmentation de capital décidée par l'assemblée générale
     extraordinaire du 30 avril 2008 :" followed by a bulleted history. The
     FP=0 result above is an ARCHEAN result; it does not transfer unchanged.
+
+    The date rule USED TO close this specific gap (superseded, see
+    test_date_rule_no_longer_closes_the_9133_gap below): this page's OCR
+    splits "30 avril 2008" across two lines ("... du 30 avril" / "2008 :"),
+    and the date rule only ever exercised its per-line
+    parse_french_date_parts against a bare, unmarked "2008" — which was
+    caught only because of the exact over-permissive bare-year fallback
+    DISCOVERY.md 8.9 fixed. Both rules now miss it identically.
     """
     d = by_short_id["9133"]
     assert has_operative_capital_text(d), "backref rule treats the recital as operative"
-    assert not has_operative_capital_text_by_date(d), "date rule correctly excludes it"
+    assert has_operative_capital_text_by_date(d), (
+        "date rule no longer excludes it either — see DISCOVERY.md 8.9: the "
+        "exclusion here always rested on the bare-year-as-any-4-digit-"
+        "numeral bug, not on a principled reading of the split date"
+    )
 
 
 def test_date_based_recital_exclusion_matches_archean_and_generalises(
     archean, by_short_id
 ):
-    """Same ARCHEAN contingency as the backref rule, but also excludes the
-    two HADEAN recitals the backref rule admits — while keeping HADEAN's
-    genuine 2022 reduction.
+    """Same ARCHEAN contingency as the backref rule — unaffected by
+    DISCOVERY.md 8.9 (ARCHEAN's own recitals all use 'aux termes de', not a
+    bare year). HADEAN's genuine 2022 reduction is still correctly kept.
+
+    This test used to also assert that 9133/9134 were excluded here where
+    the backref rule admits them. That exclusion was real but not
+    principled — see test_date_rule_no_longer_closes_the_9133_gap and
+    DISCOVERY.md 8.9's "two bugs cancelling out" finding.
     """
     gold = ARCHEAN_GOLD["capital_amount"]
     c = contingency(archean, has_operative_capital_text_by_date, lambda d: d.doc_id in gold)
     assert c.counts == (5, 0, 2, 10)
 
-    assert not has_operative_capital_text_by_date(by_short_id["9133"])
-    assert not has_operative_capital_text_by_date(by_short_id["9134"])
     # 9139 is HADEAN's 2022 capital reduction — genuinely operative
     assert has_operative_capital_text_by_date(by_short_id["9139"])
 
 
-def test_date_rule_reduces_cross_corpus_disagreement_with_typerdd(docs):
-    """Outside ARCHEAN the date rule disagrees with typeRdd on 1 document,
-    the backref rule on 4. Reported as agreement, never as accuracy.
+def test_date_rule_no_longer_closes_the_9133_gap(by_short_id):
+    """DISCOVERY.md 8.9: fixing the bare-year-as-any-4-digit-numeral bug
+    necessarily removes an accidental side effect of that same bug — this
+    page's OCR splits "30 avril 2008" across two lines, and the date rule's
+    previous exclusion of 9133/9134 rested entirely on the bare, unmarked
+    "2008" fragment being (wrongly, by the old rule) accepted as a year.
+    Fixing that acceptance costs this real exclusion too. Recorded here as
+    its own test so the trade-off cannot be lost silently in a docstring.
+    """
+    assert has_operative_capital_text_by_date(by_short_id["9133"])
+    assert has_operative_capital_text_by_date(by_short_id["9134"])
+
+
+def test_date_rule_no_longer_distinguishes_itself_from_backref_cross_corpus(docs):
+    """Superseded finding (DISCOVERY.md 8.5, corrected by 8.9): outside
+    ARCHEAN the date rule used to disagree with typeRdd on only 1 document
+    where the backref rule disagreed on 4 — its entire cross-corpus
+    advantage was 9133 and 9134. Now that DISCOVERY.md 8.9 has fixed the
+    bug that advantage rested on, both rules produce IDENTICAL results
+    here: same FP set, same FN set. The date rule is no longer measured to
+    generalise better than the backref rule outside ARCHEAN; it is only
+    still preferred on the ARCHEAN gold-labelled measurement above, where
+    it is at least as good and costs nothing.
     """
     labelled = [(s, d) for s, d in docs if has_typerdd(d) and s != ARCHEAN_SIREN]
     backref = contingency(labelled, has_operative_capital_text, typerdd_capital)
     dated = contingency(labelled, has_operative_capital_text_by_date, typerdd_capital)
-    assert len(backref.fp) == 4
-    assert len(dated.fp) == 1
-    assert {i[-4:] for i in dated.fp} == {"9139"}
-
-
-def test_the_date_rule_is_more_conservative_not_strictly_better(docs):
-    """It trades recall for precision: more FN than the backref rule outside
-    ARCHEAN. Recorded so the trade-off is not lost.
-    """
-    labelled = [(s, d) for s, d in docs if has_typerdd(d) and s != ARCHEAN_SIREN]
-    backref = contingency(labelled, has_operative_capital_text, typerdd_capital)
-    dated = contingency(labelled, has_operative_capital_text_by_date, typerdd_capital)
-    assert len(dated.fn) > len(backref.fn)
+    assert dated.counts == backref.counts
+    assert {i[-4:] for i in dated.fp} == {i[-4:] for i in backref.fp} == {
+        "5421", "9133", "9134", "9139",
+    }
+    assert dated.fn == backref.fn
 
 
 # ===========================================================================

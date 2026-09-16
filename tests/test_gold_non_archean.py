@@ -358,9 +358,27 @@ def test_no_disagreement_is_uncategorized_as_other(gold, gold_docs_by_id):
 
 
 def test_agreement_and_disagreement_counts_match_measured_state(gold, gold_docs_by_id):
-    """The exact counts measured and written into DISCOVERY.md 8.8 on
-    2026-09-17: 8 agreements, 6 disagreements (3 date_problem, all one root
-    cause; 3 mechanism_coverage_gap, all share_transfer's known ceiling).
+    """The exact counts measured and written into DISCOVERY.md 8.9 after the
+    four-digit numeral/year fix: 10 agreements, 4 disagreements (1
+    date_problem, 3 mechanism_coverage_gap — share_transfer's known ceiling,
+    unaffected by this fix).
+
+    Before the fix (DISCOVERY.md 8.8, superseded): 8 agreements, 6
+    disagreements (3 date_problem, 3 mechanism_coverage_gap). Fixing the
+    bare-year-as-any-4-digit-numeral bug (8.9) correctly flips 5420's and
+    5426's capital_amount items from disagree to agree — both are real,
+    realised capital increases and are now classified OPERATIVE, matching
+    gold. 5421's capital_amount item stays a disagreement, but its own
+    known_findings text already named the second, independent cause: a
+    boilerplate line matches TRANSITION_RE+AMOUNT_RE on its own ("...au
+    titre de l'augmentation de capital de la" + a nearby amount) and used to
+    be accidentally suppressed into RECITAL by the very year-misparse bug
+    fixed here. Removing that bug does not remove the boilerplate
+    false-match; it only stops hiding it, so the document now surfaces as
+    OPERATIVE instead of RECITAL — still a disagreement against gold's
+    MENTION, still correctly categorised date_problem because it is the
+    same known_finding_id ("date-misparse-share-counts-as-years"), just a
+    different downstream verdict of the same root cause.
     """
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     import gold_compare
@@ -369,40 +387,53 @@ def test_agreement_and_disagreement_counts_match_measured_state(gold, gold_docs_
     rows = gold_compare.compare(gold, gold_docs_by_id)
     agree = sum(1 for r in rows if r.get("agree"))
     disagree = sum(1 for r in rows if r.get("agree") is False)
-    assert agree == 8
-    assert disagree == 6
+    assert agree == 10
+    assert disagree == 4
 
     cats = Counter(r.get("category") for r in rows if r.get("agree") is False)
-    assert cats == Counter({"date_problem": 3, "mechanism_coverage_gap": 3})
+    assert cats == Counter({"date_problem": 1, "mechanism_coverage_gap": 3})
 
 
-def test_the_three_date_problem_disagreements_are_541d_sibling_cases(gold, gold_docs_by_id):
-    """Precisely which items: 5421, 5420, 5426's capital_amount — all three
-    share the same root cause (a bare share/part count misparsed as a year)
-    and none is 541d, whose document-level verdict still agrees despite
-    carrying the same underlying bug on a secondary evidence line.
+def test_the_remaining_date_problem_disagreement_is_5421_capital(gold, gold_docs_by_id):
+    """Only one of the original three date_problem items is still a
+    disagreement. 5420 and 5426's capital_amount items are fixed (see
+    test_5420_and_5426_are_now_correctly_operative below) — they no longer
+    appear here. 5421's capital_amount item remains, for the independent,
+    pre-documented boilerplate-match reason recorded in this gold item's own
+    known_findings entry, not because the year-misparse bug is unfixed.
     """
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     import gold_compare
 
     rows = gold_compare.compare(gold, gold_docs_by_id)
     date_problem_ids = {r["item_id"] for r in rows if r.get("category") == "date_problem"}
-    assert date_problem_ids == {
-        "bockel-5421-capital", "bockel-5420-capital", "bockel-5426-capital",
-    }
+    assert date_problem_ids == {"bockel-5421-capital"}
 
 
-def test_route_py_was_not_modified_to_produce_these_results():
-    """This step's explicit scope: route.py is read-only. A hash-free proxy
-    check — the specific bug signature (bare-digit year acceptance with no
-    calendar-plausibility guard beyond 1000-2999) must still be present,
-    since if it had been "fixed" to pass this gold set, the disagreements
-    above would have disappeared.
+def test_the_fix_lives_in_frenchnums_context_layer_not_a_route_py_special_case():
+    """This step's explicit scope was to fix the bug conservatively, in
+    whichever layer's contract was actually wrong — not to make route.py
+    special-case JACQUES BOCKEL's numbers to pass this gold set.
+
+    Phase-2 audit conclusion (DISCOVERY.md 8.9): parse_french_year's own
+    lexical contract is correct and unchanged — called in isolation on a
+    string, it cannot know whether "1766" means a year or a quantity, and
+    it is not its job to guess. That is still true:
     """
-    from archean.frenchnum import parse_french_date_parts
+    from archean.frenchnum import FrenchDateError, parse_french_date_parts, parse_french_year
 
-    assert parse_french_date_parts("1766").year == 1766
-    assert parse_french_date_parts("2000").year == 2000
+    assert parse_french_year("1766") == 1766
+    assert parse_french_year("2000") == 2000
+
+    # The fix is in the *context-consuming* layer instead: a bare 4-digit
+    # numeral with no day, no month and no explicit "l'an" marker is not a
+    # date at all, so parse_french_date_parts (not parse_french_year) now
+    # refuses it — this is what actually stops route.py's recital check
+    # from treating either share count as an earlier year.
+    with pytest.raises(FrenchDateError):
+        parse_french_date_parts("1766")
+    with pytest.raises(FrenchDateError):
+        parse_french_date_parts("2000")
 
 
 # ===========================================================================
@@ -416,18 +447,26 @@ def test_541d_document_level_verdict_still_agrees_despite_the_bug(gold_docs_by_i
     assert result.verdict == Verdict.OPERATIVE
 
 
-def test_5420_and_5426_are_misclassified_as_recital_not_operative(gold_docs_by_id):
-    """Pinned exactly as measured — this is what "not fixed here" means in
-    practice: the wrong verdict is asserted as the CURRENT behaviour, not
-    silently worked around.
+def test_5420_and_5426_are_now_correctly_operative(gold_docs_by_id):
+    """Was pinned as a bug (DISCOVERY.md 8.8): 'euros par création de 2000
+    parts nouvelles de 75,00 euros' has its share count '2000' misread as a
+    year earlier than the 2013 filing, wrongly suppressing the sole
+    operative line in each file ('pour le porter de 150 000 euros à 300 000
+    euros') into RECITAL.
+
+    Fixed by DISCOVERY.md 8.9: parse_french_date_parts's bare-year fallback
+    now requires an explicit "l'an" marker, so a bare "2000" with no day, no
+    month and no marker is no longer read as a date at all. Both documents
+    correctly reach OPERATIVE, matching gold. Original corpus text and
+    document identity kept unchanged from the pinned version — only the
+    expected verdict changed, per DISCOVERY.md 8.9.
     """
     for short in ("5420", "5426"):
         doc = next(d for d in gold_docs_by_id.values() if d.doc_id.endswith(short))
         result = classify(doc, "capital_amount")
-        assert result.verdict == Verdict.RECITAL, (
-            f"{short}: expected the known bug's effect (RECITAL); if this "
-            f"changed, route.py or frenchnum.py was modified — check "
-            f"DISCOVERY.md 8.8 before updating this test"
+        assert result.verdict == Verdict.OPERATIVE, (
+            f"{short}: expected the fixed behaviour (OPERATIVE); if this "
+            f"regressed, check DISCOVERY.md 8.9's bare-year-fallback fix"
         )
 
 

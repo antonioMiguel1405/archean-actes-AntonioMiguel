@@ -157,20 +157,27 @@ Rules never invented beyond what §8.3–§8.6 measured:
 - No `if doc.doc_id == "...":` anywhere — verified by an AST-based test, not a text scan
   (the module's own docstring quotes that exact forbidden pattern as an example).
 
-**A known, unfixed bug, found via `tests/data/gold_non_archean.json` (DISCOVERY.md §8.8),
-not yet corrected — read the full finding before touching `frenchnum.py`'s year parsing or
-`route.py`'s recital window:**
-`archean.frenchnum.parse_french_year` accepts any bare 4-digit numeral in 1000–2999 as a
-year, no further validation. Share/part counts routinely fall in that range. Confirmed three
-times on JACQUES BOCKEL SARL (445070311): `"1766"` (a share count) and `"2000"` (another
-share count) both get read as years, both earlier than the surrounding document's own year,
-both wrongly trigger `_cites_earlier_year` and suppress a genuinely `OPERATIVE` line into
-`RECITAL`. Two real capital increases (150 000 → 300 000 euros, decided, adopted, realised)
-are misclassified as a result — `classify()`'s control flow (`operative → OPERATIVE; elif
-suppressed → RECITAL; else check topic`) means even ONE falsely-suppressed candidate flips
-the whole document, with no fallback to the topic-only `MENTION` check. Never surfaced in
-ARCHEAN or HADEAN because neither happened to place a 4-digit share count within 3 lines of
-a transition+amount line. Not fixed — this step's scope was evidence, not repair.
+**A found-and-fixed bug** (found via `tests/data/gold_non_archean.json`, DISCOVERY.md §8.8;
+fixed in DISCOVERY.md §8.9 — read §8.9 in full before touching `frenchnum.py`'s year parsing
+or `route.py`'s recital window again): `archean.frenchnum.parse_french_date_parts`'s no-month
+fallback used to accept any bare 4-digit numeral in 1000–2999 as a year, with no contextual
+check (`parse_french_year` itself, called in isolation, was and still is correct — a lexical
+parser cannot know whether `"1766"` means a year or a quantity; the bug was in the
+context-consuming fallback one layer up). Share/part counts routinely fall in that range.
+Confirmed on JACQUES BOCKEL SARL (445070311): `"1766"` and `"2000"` (share counts) were both
+read as years earlier than the surrounding document's own year, wrongly triggering
+`_cites_earlier_year` and suppressing genuinely `OPERATIVE` lines into `RECITAL`. **Fix**:
+the fallback now requires an explicit `l'an` marker (measured against the whole corpus: 842
+false bare-year reads → 28, all verified genuine; the largest false-positive source, 151
+corpus-wide hits, was `"l'article <N> du Code Civil"` citations, not share counts). A second,
+independent bug found as a byproduct — an OCR-split registration stamp (`"3 0 MAI 2012"`)
+could crash `_cites_earlier_year` with an unhandled `ValueError` — was fixed the same session
+(`_validate_calendar_date`, plus a widened except clause). **Not free**: fixing this also
+removed an accidental correct answer in `scripts/validate_routing.py`'s independent date-rule
+implementation on two HADEAN documents (`9133`/`9134`) whose recital date happens to be
+OCR-split across two lines — that exclusion always rested on the same over-permissive
+fallback, never on a principled reading of the split date. Cross-line OCR date splitting is a
+separate, still-open, unfixed defect (see DISCOVERY.md §8.9's remaining limitations).
 
 ## Second gold set — `tests/data/gold_non_archean.json`
 
@@ -179,10 +186,11 @@ The only other hand-verified gold set besides ARCHEAN's. Company: JACQUES BOCKEL
 diversity, an explicit Constitution tag) computed before any document was read. HADEAN was
 explicitly excluded from candidacy — it was already used to validate `route.py`'s recital
 logic, so it is not independent. `scripts/gold_compare.py` runs the blind comparison; see
-DISCOVERY.md §8.8 for the full result (8/14 agree; the 6 disagreements are 3 instances of the
-bug above and 3 confirmations of `share_transfer`'s known `OPERATIVE` ceiling — zero
-uncategorised). Do not add new items to this file to make agreement look better; do not
-re-derive existing items' verdicts from `route.py`'s own output.
+DISCOVERY.md §8.9 for the current result (10/14 agree, up from 8/14 before the fix above; the
+4 remaining disagreements are 1 residual instance of the bug above — same root cause, a
+different downstream verdict, see §8.9 — and 3 confirmations of `share_transfer`'s known
+`OPERATIVE` ceiling — zero uncategorised). Do not add new items to this file to make agreement
+look better; do not re-derive existing items' verdicts from `route.py`'s own output.
 
 Findings that generalised, and one that didn't:
 - **A genuine `share_transfer` `OPERATIVE` case exists** (JACQUES BOCKEL → Mathieu

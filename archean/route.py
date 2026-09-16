@@ -180,6 +180,16 @@ _RECITAL_WINDOW = 3
 def _cites_earlier_year(lines: list[OcrLine], index: int, document_year: int) -> bool:
     """True if a line within ``_RECITAL_WINDOW`` of ``lines[index]`` (same
     page only) states a year earlier than the document's own filing year.
+
+    Catches ``ValueError`` alongside ``FrenchDateError``: an OCR-split
+    registration stamp such as ``"3 0 MAI 2012"`` (the day digits "3" and "0"
+    separated by a space) lets ``_DAY_MONTH_YEAR`` match day=0, which
+    ``DateParts.to_date()`` rejects with a plain ``ValueError``, not the
+    ``FrenchDateError`` this function otherwise expects — found by running
+    this exact call over the whole corpus during the audit for the
+    numeral-as-year fix (DISCOVERY.md 8.9), not by design. This function's
+    contract is best-effort — "no parseable date here" and "a malformed one
+    here" both mean the same thing to a recital check: skip this line.
     """
     target_page = lines[index].page
     lo = max(0, index - _RECITAL_WINDOW)
@@ -189,7 +199,7 @@ def _cites_earlier_year(lines: list[OcrLine], index: int, document_year: int) ->
             continue
         try:
             parts = parse_french_date_parts(lines[j].text)
-        except FrenchDateError:
+        except (FrenchDateError, ValueError):
             continue
         if parts.year is not None and parts.year < document_year:
             return True

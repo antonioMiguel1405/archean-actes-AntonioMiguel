@@ -991,6 +991,19 @@ to declare which source is wrong, so it is recorded as a conflict. `[F]` The dat
 **more conservative, not strictly better**: outside ARCHEAN it has more false negatives
 than the backref rule (5 vs 2 against `typeRdd`). That trade-off is real and unresolved.
 
+`[U]` **Superseded by §8.9.** The two paragraphs above were true of the code as it stood on
+2026-09-16. §8.9 found that the `9133`/`9134` exclusion here, and the "4 documents to 1"
+drop, rested entirely on `parse_french_date_parts` accepting a bare, unmarked `"2008"` (the
+back half of `"30 avril 2008"`, split across an OCR line boundary) as a year with no
+contextual check — the identical bug that misreads JACQUES BOCKEL's share counts. Once that
+over-permissive fallback is fixed, `9133`/`9134` are no longer excluded either: the fix
+removes an accident along with the bug it was accidentally compensating for. Post-§8.9, the
+date rule and the backref rule are cross-corpus **identical** — same FP set (`5421`, `9133`,
+`9134`, `9139`), same FN set. See §8.9 for the corrected measurement, and note in passing
+that `5421`'s presence in that FP set was never actually an instance of HADEAN's "Lors de"
+recital form (it has no such text at all, checked directly during §8.9's audit) — its
+disagreement with `typeRdd` has a different, separate cause (§8.9 §7).
+
 #### Context scope — measured, not assumed
 
 `[F]` A capital topic phrase co-occurring with a euro amount, against ARCHEAN's gold:
@@ -1386,6 +1399,186 @@ whether the third recital surface form found here (§4.D) would matter in a comp
 *does* co-occur with an amount; how many companies in the corpus have a share/part count in
 the 1000–2999 range near a capital resolution (not measured — this step found the bug in one
 company, it did not survey its prevalence).
+
+### 8.9 Four-digit numeral / year ambiguity — the fix, and what fixing it cost
+
+`[F]` **How it was found.** §8.8's independent gold set surfaced it as a router
+disagreement first, then it was traced to its root: `archean.frenchnum.parse_french_date_parts`
+accepted **any** bare 4-digit numeral in 1000–2999 as a year, with no contextual check.
+Confirmed three times on JACQUES BOCKEL SARL (445070311) — `541d` p.3, `5421` p.5, and
+`5420`/`5426` — where share/part counts `"1766"` and `"2000"` were each read as a year
+earlier than the document's own filing year, wrongly triggering
+`archean.route._cites_earlier_year` and suppressing genuinely `OPERATIVE` lines into
+`RECITAL`. `5420`/`5426`'s misclassification was the most consequential: two real, decided,
+adopted, realised capital increases (150 000 → 300 000 euros) were misread as historical
+recitals.
+
+`[F]` **Which layer was responsible — audited, not assumed.** `parse_french_year`, called in
+isolation on a string, has no way to know whether `"1766"` means a year or a quantity — that
+is not a defect in its contract, it is the nature of a lexical parser with no surrounding
+text. Verified this stayed true after the fix: `parse_french_year("1766") == 1766` and
+`parse_french_year("2000") == 2000` still hold (`tests/test_gold_non_archean.py::
+test_the_fix_lives_in_frenchnums_context_layer_not_a_route_py_special_case`,
+`tests/test_frenchnum.py::test_parse_french_year_still_accepts_an_isolated_four_digit_numeral`).
+The actual defect was one level up, in `parse_french_date_parts`'s **no-month fallback**: when
+no day, no month word and no numeric date shape matched anywhere on a line, it called
+`_trailing_year` on the **whole, unanchored line** — a helper written to be safe only when
+called *after* an anchor already precedes it (a month word), not on arbitrary text. That
+call site, not `parse_french_year`'s own contract, is where the fix belongs.
+
+`[F]` **Corpus-wide surface, measured against the actual shipped code, both before and
+after the fix** (all 20 companies, `scripts/validate_routing.py`'s `read_document_lines`,
+67 426 total OCR lines):
+
+| | lines |
+|---|--:|
+| total OCR lines scanned | 67 426 |
+| lines where `parse_french_date_parts` finds a day+month (date-shaped; unaffected by this fix) | 1 569 |
+| **pre-fix**: lines where the unrestricted no-month fallback returned a bare year | 842 |
+| **post-fix**: lines where the `l'an`-marked fallback returns a bare year | 28 |
+| refused post-fix (97% of the 842) | 814 |
+
+`[F]` Of the 842 pre-fix bare-year hits, three false-positive classes dominate, none of them
+previously identified: statutory article citations (`"l'article 1424 du Code Civil"` — **151
+corpus-wide hits, the single largest source**, bigger than the share-count trigger that
+surfaced the bug), registry/greffe reference numbers (`"Code greffe : 2104"`, `"N/REF : 55 B
+140 / A-3545"`), and bare amounts (`"Enregistrement : 1196 euros"`) — in addition to the
+share/part counts that started this investigation. `[F]` The 28 kept post-fix were checked
+individually: every one is a genuine `"L'an <year>,"` preamble, spanning at least 12
+companies.
+
+`[F]` **Fix chosen.** `parse_french_date_parts`'s no-month fallback now requires an explicit
+`l'an` marker (`_bare_year_if_marked`, `archean/frenchnum.py`) before it will read a bare
+year at all — reusing the existing `_trailing_year` extraction unchanged, just gating when it
+is called. No new regex beyond the one-word marker; no fuzzy matching; no document-ID or
+company-specific branching (still enforced by `tests/test_route.py::
+test_no_document_id_special_casing_anywhere_in_route_py`'s AST check). `archean/route.py`'s
+`_cites_earlier_year` itself needed only its exception clause widened (see next finding) — the
+recital-window logic, the 3-line scope, and `_RECITAL_WINDOW` are untouched.
+
+`[F]` **Alternative measured and rejected: the preposition `en`** (as in `"en 2018"`, the
+form this task's own brief suggested checking first). Measured directly: of the 842 bare-year
+hits, only 18 contain `en` immediately before the numeral, and on inspection most of those 18
+are still false positives — `en` is also the partitive "divided INTO N shares" (`"divisé en
+2500 actions"`, `"divisé en 4000 parts"`), and cannot be told apart from the temporal sense by
+local context alone without a much larger, riskier rule. Rejected in favour of `l'an`, whose
+28 kept hits were each individually verified genuine.
+
+`[F]` **Alternative considered and rejected: never use an isolated 4-digit number as recital
+evidence at all** (Phase 6's fallback option). Not needed — the `l'an` marker gives a
+100%-precision positive signal on the measured 28, so the more drastic option (discarding the
+bare-year path entirely, which would also silently drop `test_a_spelled_year_line_yields_only_
+a_year`'s three existing cases) was not required.
+
+`[F]` **A second, independent bug found as a byproduct of this audit, and fixed the same
+way.** Running `parse_french_date_parts` over the whole corpus (not merely the lines that
+matter for routing) surfaced 3 lines where an OCR-split registration stamp — the day digits
+separated by a space, e.g. `"3 0 MAI 2012"` (`027080076`, doc `63e8c25c7e898005f51aaa52`,
+page 1) and `"2 0 AOUT 2007"` (445070311's `5420`/`5426`) — lets the day+month+year regex
+capture day=0. `DateParts.to_date()` raises a bare stdlib `ValueError` there, not this
+module's own `FrenchDateError`, which `archean.route._cites_earlier_year`'s original
+`except FrenchDateError:` was not prepared to catch — an **unhandled crash**, not a
+misclassification, on any document containing this artifact within a recital-check window.
+Fixed at its source (`archean/frenchnum.py`'s new `_validate_calendar_date`, converting the
+raw `ValueError` into `FrenchDateError` — safe because `FrenchDateError` already **is** a
+`ValueError` subclass, so no existing `except FrenchDateError` or `except ValueError` caller
+narrows) and defensively at the consumer (`_cites_earlier_year`'s except clause widened to
+`except (FrenchDateError, ValueError):`, documented in its own docstring as a belt-and-braces
+measure, not the primary fix).
+
+`[F]` **Regressions protected.** `tests/test_frenchnum.py`: 8 new cases — the exact `1766`/
+`2000` corpus lines refused as dates, the `l'an`-marker contract (positive and negative),
+`parse_french_year`'s isolated contract unchanged, and both calendar-invalid stamps raising
+`FrenchDateError`. `tests/test_route.py`: `_cites_earlier_year` tested directly against the
+real corpus text for both share counts (must not suppress), all three genuine recital forms
+(full numeric date, dd/mm/yyyy, `l'an`-marked bare year — must still suppress), a same-year
+date (must not suppress), and both calendar-invalid stamps (must not crash).
+`tests/test_gold_non_archean.py`: the two tests that had pinned the pre-fix bug as current,
+correct behaviour (`test_5420_and_5426_are_misclassified_as_recital_not_operative` →
+`test_5420_and_5426_are_now_correctly_operative`; the anti-tampering check that used to assert
+`parse_french_date_parts("1766").year == 1766` → `test_the_fix_lives_in_frenchnums_context_
+layer_not_a_route_py_special_case`, which instead confirms the fix landed in the
+context-consuming layer, not a `route.py` special case) were transformed, not deleted — same
+corpus text, same document identity, corrected expected verdict. The gold file itself,
+`tests/data/gold_non_archean.json`, was **not modified**.
+
+`[F]` **Gold-set impact, `scripts/gold_compare.py` re-run against the fixed code**: 10 of 14
+agree (71%, up from 8/14), 4 disagree (down from 6):
+
+| item | mechanism | gold | router (pre-fix) | router (post-fix) | category |
+|---|---|---|---|---|---|
+| `bockel-5420-capital` | capital_amount | OPERATIVE | RECITAL | **OPERATIVE** ✓ | fixed |
+| `bockel-5426-capital` | capital_amount | OPERATIVE | RECITAL | **OPERATIVE** ✓ | fixed |
+| `bockel-5421-capital` | capital_amount | MENTION | RECITAL | OPERATIVE | `date_problem` (still disagrees) |
+| `bockel-5421-transfer` | share_transfer | SILENT | MENTION | MENTION (unchanged) | `mechanism_coverage_gap` |
+| `bockel-5420-transfer` | share_transfer | OPERATIVE | MENTION | MENTION (unchanged) | `mechanism_coverage_gap` |
+| `bockel-5426-transfer` | share_transfer | OPERATIVE | MENTION | MENTION (unchanged) | `mechanism_coverage_gap` |
+
+`[I]` `bockel-5421-capital` **stays a disagreement, but not for the fixed reason.** Its own
+`known_findings` entry (§8.8.5) already named the second, independent cause on the record
+before this fix existed: a boilerplate line matches `TRANSITION_RE`+`AMOUNT_RE` on its own
+(`"...au titre de l'augmentation de capital de la"` — `TRANSITION_RE` has no requirement that
+an amount actually follow "de", so this is a pre-existing, separate pattern-matching
+imprecision, not a date problem in itself) and used to be accidentally hidden inside a
+`RECITAL` verdict by the very year-misparse bug fixed here. Removing that bug does not remove
+the boilerplate false match; it only stops masking it, so the document now reaches `OPERATIVE`
+directly instead of `RECITAL` — still wrong against gold's `MENTION`, still the same
+underlying finding (`known_finding_id: "date-misparse-share-counts-as-years"`), just a
+different downstream verdict. `scripts/gold_compare.py`'s categorisation is keyed off that
+`known_finding_id`, not re-derived from the verdict, so it correctly stays `date_problem`
+without any change to `scripts/gold_compare.py` itself.
+
+`[F]` **ARCHEAN regression — unaffected.** `tests/test_route.py`'s full ARCHEAN suite passes
+unchanged: `…ec4` still `OPERATIVE`, `…ec2` still the metadata/content conflict, `…7ebf`/`…7ec8`
+still `MENTION`/`MENTION`, `…ec7` still positive for both mechanisms, `…7ec9`/`…7ecb`/`…7ebd`
+still `RECITAL` via `"aux termes de"` (untouched by this fix — none of ARCHEAN's own recitals
+ever depended on the bare-year path), and the page-5 "approved principle" known limitation
+(`test_known_limitation_transition_rule_also_matches_an_approved_principle`) is unchanged.
+None of ARCHEAN's 293 OCR pages happens to place a 4-digit share count within the recital
+window of a transition+amount line, so the bug never reached ARCHEAN in either direction.
+
+`[U]` **New discovery, not anticipated by this step's scope: fixing this bug also removed an
+accidental correct answer.** `scripts/validate_routing.py` carries its own, independent
+implementation of the same date-based recital rule (`_past_date_near`/
+`operative_hits_by_date`, built to validate `route.py`'s design — §8.5), sharing
+`archean.frenchnum` as its only date-parsing dependency. §8.5 measured that this rule excluded
+two HADEAN documents (`9133`, `9134`) that the `"aux termes de"` backref rule missed — a
+genuine recital, `"Lors de l'augmentation de capital décidée par l'assemblée générale
+extraordinaire du 30 avril 2008 :"`. That page's OCR **splits the date across two lines**
+(`"... du 30 avril"` / `"2008 :"`, and in `9134`'s case across three: `"... du 30 a"` / `"1"` /
+`"2008 :"`), and every date parse in this codebase is line-local. The exclusion never came
+from a principled reading of the split date — it came from the bare, unmarked `"2008"`
+fragment being accepted by the exact over-permissive fallback this step fixed. Once that
+acceptance is gone, so is the accidental exclusion: `9133`/`9134` are no longer detected as
+recitals by either rule, and post-fix the date rule and the backref rule are cross-corpus
+**identical** (same FP set `{5421, 9133, 9134, 9139}`, same FN set) — the date rule's
+previously-measured cross-corpus advantage over the backref rule (§8.5: "disagreement with
+`typeRdd` drops from 4 documents to 1") no longer holds and §8.5 has been annotated in place
+to point here. `archean/route.py`'s own `_cites_earlier_year` has the identical behaviour on
+the identical text (`tests/test_route.py::
+test_known_limitation_date_recital_is_missed_when_ocr_splits_the_date`, `…9133` now correctly
+predicted to return `OPERATIVE`, not `RECITAL`/`MENTION`). This is HADEAN, not ARCHEAN or the
+gold-non-archean company, and it does not change any gold-agreement number in §8.8/8.9 above
+— but it is recorded here in full because silently absorbing a real accuracy loss into "the
+fix worked" would be exactly the kind of thing this step was designed to prevent.
+
+`[R]` **This is not claimed as solved — remaining, explicitly unresolved limitations:**
+- **Cross-line OCR date splitting is a separate, still-open defect**, exposed rather than
+  caused by this fix. `CLAUDE.md` already flagged line-joining as unvalidated future work for
+  `extract_text`'s bare-phrase matching (§8.4); the same limitation now demonstrably applies to
+  date parsing too, and needs its own corpus-wide audit before being implemented — deliberately
+  out of scope here (Phase 11).
+- **`l'an` is the only positive marker measured and shipped.** It was sufficient for every
+  genuine bare-year case found in this corpus (28/28 verified), but a corpus this fix has not
+  scanned could contain a different genuine bare-year idiom this marker misses; that would be
+  a false negative, not a false positive, and has not been ruled out.
+- **Prevalence of the underlying pattern (a 4-digit quantity in 1000–2999 near a capital
+  resolution) across the other 18 non-ARCHEAN, non-BOCKEL companies was not surveyed** — this
+  step fixed the mechanism generally, but did not re-run the full gold-comparison exercise
+  against every company, only the one with a hand-verified gold set.
+- **`bockel-5421-capital` remains a genuine disagreement** for the separate, already-documented
+  `TRANSITION_RE` boilerplate-match reason above — not something this step's scope covers
+  fixing (that would mean narrowing `TRANSITION_RE`, an unrelated signal-tuning change).
 
 ---
 

@@ -408,6 +408,22 @@ def test_shape_b_rejects_impossible_day_month_pairs():
         parse_french_date_parts("31/02/2008")
 
 
+def test_calendar_invalid_day_month_year_raises_frenchdateerror():
+    """DISCOVERY.md 8.9: an OCR-split registration stamp, "3 0 MAI 2012" (day
+    "30" broken into "3" and "0" by a space), lets the day+month-word+year
+    shape capture day=0. ``DateParts.to_date()`` on its own raises a bare
+    ``ValueError`` here, not this module's own ``FrenchDateError`` — found by
+    running parse_french_date_parts over the whole corpus. Real corpus line:
+    document 63e8c25c7e898005f51aaa52, page 1; also "2 0 AOUT 2007" in
+    445070311's 5420/5426. FrenchDateError is itself a ValueError subclass,
+    so this is a strictly narrower, not a different, contract.
+    """
+    with pytest.raises(FrenchDateError):
+        parse_french_date_parts("3 0 MAI 2012")
+    with pytest.raises(FrenchDateError):
+        parse_french_date_parts("2 0 AOUT 2007")
+
+
 # Shape C: fully spelled.
 def test_shape_c_fully_spelled_on_one_line():
     """The one complete spelled date in the corpus."""
@@ -439,6 +455,80 @@ def test_a_spelled_year_line_yields_only_a_year(text, year):
     parts = parse_french_date_parts(text)
     assert parts.year == year
     assert parts.day is None and parts.month is None
+
+
+# ===========================================================================
+# Four-digit numeral / year ambiguity — DISCOVERY.md 8.9
+#
+# JACQUES BOCKEL SARL (445070311, tests/data/gold_non_archean.json) writes
+# share counts of 1766 and 2000 — both fall in parse_french_year's own
+# 1000-2999 "plausible year" range. Before this fix,
+# parse_french_date_parts's no-month fallback called _trailing_year on the
+# WHOLE unanchored line, so it read either number as a year with no
+# contextual check at all. archean.route._cites_earlier_year then saw a
+# "year" earlier than the document's own filing year and wrongly suppressed
+# a genuine capital-increase line into RECITAL. Real corpus line (5420/5426,
+# page 24/25): "Cet apport en nature est rémunéré par 1766 parts sociales
+# numérotées de 235 à 2000." — a single line containing both false years.
+# ===========================================================================
+
+def test_parse_french_year_still_accepts_an_isolated_four_digit_numeral():
+    """parse_french_year's own contract is unchanged: called directly on an
+    isolated string, it has no way to know whether "1766" means a year or a
+    quantity, and it is not its job to guess — the caller supplies context.
+    This is why the fix lives in parse_french_date_parts's fallback (and in
+    archean.route), not in parse_french_year itself.
+    """
+    assert parse_french_year("1766") == 1766
+    assert parse_french_year("2000") == 2000
+
+
+@pytest.mark.parametrize("text", [
+    pytest.param(
+        "Cet apport en nature est rémunéré par 1766 parts sociales "
+        "numérotées de 235 à 2000.",
+        id="corpus-5420-1766-and-2000-share-count",
+    ),
+    pytest.param(
+        "euros par création de 2000 parts nouvelles de 75,00 euros de "
+        "nominal chacune, émises au pair et à libérer",
+        id="corpus-5420-2000-share-count",
+    ),
+    pytest.param(
+        "Total des parts présentes ou représentées : 2000 parts sur les "
+        "2000 parts composants le capital social.",
+        id="corpus-5420-2000-quorum-count",
+    ),
+])
+def test_bare_four_digit_quantities_are_not_read_as_a_year(text):
+    """The exact corpus lines that caused the bug (DISCOVERY.md 8.9): no
+    day, no month, and no ``l'an`` marker — so parse_french_date_parts must
+    refuse to find a date here at all, not silently return one of the
+    numbers as a year.
+    """
+    with pytest.raises(FrenchDateError):
+        parse_french_date_parts(text)
+
+
+@pytest.mark.parametrize("text,year", [
+    ("L'an 2016,", 2016),
+    ("l'an deux mille dix-neuf,", 2019),
+])
+def test_bare_year_fallback_requires_the_lan_marker(text, year):
+    """The positive side of the same fix: a genuine bare-year preamble is
+    still read correctly when it is actually marked as one.
+    """
+    parts = parse_french_date_parts(text)
+    assert parts.year == year
+    assert parts.day is None and parts.month is None
+
+
+def test_bare_four_digit_numeral_with_no_lan_marker_is_refused():
+    """A minimal, non-corpus isolation of the fix: a bare digit string with
+    no day, no month and no ``l'an`` marker is not a date, full stop.
+    """
+    with pytest.raises(FrenchDateError):
+        parse_french_date_parts("2008 :")
 
 
 def test_a_partial_date_refuses_to_become_a_date():
