@@ -205,10 +205,17 @@ a different metadata shape entirely (`typeDocument: PJ_52`, `numNat`, no `typeRd
 ones are A4 595×842 pt. So the px→normalized conversion **must read each page's own
 `page.rect`**, never a hard-coded A4. (`bbox_viewer.polygon_to_norm` does this correctly.)
 
-`[F]` `skew_angle: 0.0` and `layout: []` on the pages inspected — the shipped `layout` array is
-empty, so there is **no reading-order / table structure** to lean on. Consequence: OCR lines
-come in raster order and **two-column tables interleave**. Real example from the constitution
-(doc 1, p.3), which is the répartition table:
+`[F]` **Correction (measured full-corpus in §8.3):** this section originally claimed
+`skew_angle: 0.0` "on the pages inspected" — that was one page, generalized wrongly. Measured
+over all 293 ARCHEAN pages, `skew_angle` is a **real, page-specific float** ranging −1.998° to
++1.985° (41 distinct nonzero values); it is never a meaningful reading-order signal, it just was
+not actually 0.0. `layout: []` **is** correctly empty for every one of the 293 ARCHEAN pages —
+that part held — but is **not** empty corpus-wide (53% of all 3 995 OCR pages across the 20
+companies have a populated `layout`, mostly on `bilans` table pages; see §8.3). So there is **no
+reading-order / table structure** to lean on **for ARCHEAN's actes specifically**, which is
+still the operative fact for this project. Consequence: OCR lines come in raster order and
+**two-column tables interleave**. Real example from the constitution (doc 1, p.3), which is the
+répartition table:
 
 ```
 Monsieur Xavier AUMONT
@@ -719,6 +726,185 @@ that matter most:
 component and buys literally nothing for 480489707. Mention in the README that the design has a
 slot for it and that three companies in the wider corpus (IMPRESSIONS DUMAS, AIR SYSTEM SERVICE,
 E PECOU) have zero OCR — that shows we saw the problem without paying for it.
+
+### 8.3 OCR content structure — audited across the whole corpus, not sampled
+
+Before writing any routing tool, every top-level and OCR-item-level key actually shipped was
+censused over **all 3 995 OCR pages, 20 companies, actes + bilans** — not just the 293 ARCHEAN
+actes pages this project had looked at before. Two of §4.1's original claims were wrong because
+they generalized from a one-page sample; both are corrected here and in §4.1 above.
+
+`[F]` **Top-level page shape.** Two variants exist, corpus-wide:
+`{page, ocr, layout, most_frequent_angle, skew_angle, pdf}` (3 257 pages) and the same plus
+`{_reocr_corrected_count, _reocr_failed_count, _reocr_failures}` (738 pages, **18.5% of the
+whole corpus** — not the 3.4%/"10 of 293" figure the prior pass reported, which was ARCHEAN-only
+and never claimed to be corpus-wide, but is easy to misread as typical). `[F]` For ARCHEAN's own
+293 actes pages specifically, the `_reocr_*` variant is 10 pages (3.4%) — that narrower number
+stands, scoped correctly this time.
+
+`[F]` **`_reocr_*` meaning, determined by direct inspection, not assumed.** Every `_reocr_*`
+page in ARCHEAN's corpus also carries `text_original` on the specific OCR item that was
+corrected — e.g. `…ebd` p.27: `text_original: "(1)"` corrected to `text: "(i)"`; `…ec7` p.16:
+`"- 6 -"` corrected to `"9 -"`; `…ec9` p.14: `"(3"` corrected to `"c)"`. `[I]` This is consistent
+with a re-OCR retry pass over low-confidence single-token regions (all three are footnote
+markers or page-number stamps, all short, all marginal); `[H]` the retries are not obviously
+improvements — `"(1)"→"(i)"` and `"- 6 -"→"9 -"` both look like lateral moves or regressions on
+a human read, not corrections. Every `_reocr_failures` entry inspected (10 across ARCHEAN) is
+the same shape: a single isolated character or short token at a page margin — never inside body
+text, never touching anything the capital chain or a routing signal depends on. `[R]` Not
+consumed by `extract_text`/`phrase_present`; recorded so nobody is surprised by the extra keys.
+
+`[F]` **`layout` is a real, populated table/region-detector output outside ARCHEAN's actes.**
+Where non-empty (2 118 of 3 995 pages, 53%), it is a list of `{bbox, label, score, cells?,
+texts?}` blocks — `label: "text"` blocks wrap a `texts[]` array shaped exactly like the
+top-level `ocr[]` items; `label`-less blocks with `cells[]` are table-cell groups, each cell
+again wrapping a `texts[]` array. `[I]` This looks like table detection specifically for
+financial-statement pages (the one example inspected in depth, `015551401/bilans/…`, is a bilan
+balance-sheet page with cells like "CAPITAUX PROPRES", "Comptes de régularisation"). `[F]` It is
+empty for **all 293 of ARCHEAN's actes pages** with no exception — confirmed by direct count,
+not sampling. `[R]` Not used by anything built for this project; recorded because a future group
+bonus pass touching `bilans/` folders will find it populated and should know what it is before
+building anything against it.
+
+`[F]` **OCR-item-level fields beyond `{orientation_angle, polygon, score, text}`.** Corpus-wide:
+`words` (4 758 items — a sub-word tokenization of the line, each word its own `{box, text}`) and
+`text_original` (1 368 items, always co-occurring with a page-level `_reocr_*` block) and
+`words_stale` (5 items). `[F]` **None of `words`, `words_stale` occur anywhere in ARCHEAN's own
+293 pages**; `text_original` occurs exactly 3 times there (the three `_reocr_*` corrections
+above). `[F]` `words` **does** occur in HADEAN's actes (`data/499979540/`, ARCHEAN's own
+associée unique) — e.g. `"RCS : MONTAUBAN"` breaks into `["RCS", " : ", "MONTAUBAN"]`. `[R]` Not
+needed for line-level phrase matching (§8.4); would matter only for token-level extraction
+(e.g. picking a single digit out of a run), which nothing built so far requires.
+
+`[F]` **Duplicate and empty lines.** Zero pages in ARCHEAN's corpus have a completely empty
+`ocr: []` array. Zero exact `(text, polygon)` duplicate lines exist anywhere in the 293 pages.
+54 of 11 254 lines have empty (whitespace-only) `text`; **every one of them has `score: 0.0`**
+— a clean, exact rule, not a heuristic: `score == 0.0` implies an empty-text detection, with no
+counterexample in the corpus. `[F]` Non-empty text can still carry a very low score (`0.27` for
+a single stray `"r"`, `0.52` for `"-"`) — these are kept by `extract_text`, since phrase-level
+substring matching is not sensitive to an isolated low-confidence token elsewhere on the page,
+and filtering by a score threshold rather than by `score == 0.0` would need its own justification
+this project has not built.
+
+`[F]` **Reading order and encoding.** Lines are UTF-8, accented characters intact, no decoding
+issues anywhere they were checked. OCR-array order is close to top-to-bottom reading order
+except for the already-documented interleaved-table pathology (§4.1); no *new* ordering anomaly
+surfaced by this pass.
+
+### 8.4 Routing signal evidence — measured, not intuited
+
+`scripts/analyze_routing.py` (see the script's own docstring for the full methodology) measures
+candidate phrases against two label sources that are never conflated:
+
+- **`gold`** — ARCHEAN's own 17 documents, labelled by facts already established elsewhere in
+  this project: `tests/golden_capital_chain.json`'s `source.inpi_id` set for `capital_amount`,
+  plus `…ebf` (which *authorises* the 2017 reduction `…ebe` *realises* — the golden chain cites
+  only the realisation as its numeric source, which under-counts documents that are
+  substantively about the event); and `share_transfer` from two documents this conversation has
+  read directly (`…ec2`, the 2005 cession ratification; `…ec7`, which also authorises a
+  225-share cession to CAPGRAS). This is the only trustworthy label source in this project.
+- **`typerdd`** — a weak label from `meta['typeRdd']`, across all 177 acte documents in the
+  20-company corpus (115 with OCR). Large, but demonstrably noisy (see the finding below); used
+  only to widen candidate generation, never as ground truth.
+
+**`[F]` `typeRdd` is not reliably scoped to its own PDF — a finding, not a hypothesis.**
+`…ec2`'s (2006-01-04) `typeRdd` lists `"Augmentation du capital social"` as one of its decisions.
+Its OCR text — all 7 pages, read in full — contains no augmentation text at all: the only
+`"capital"` mentions are the boilerplate header and a quorum sentence. The document adjacently
+filed one day earlier, `numChrono` one lower (`…ec4`, `numChrono` 20 vs `…ec2`'s 21), **is**
+where the real 2005-05-17 augmentation is stated (`"réalisation définitive de l'augmentation de
+capital de 113 000 €"`) — and `…ec4`'s own `typeRdd` is empty. `[I]` This looks like a
+registry-side batch-vs-file correspondence error (a decision tag attached to the wrong file
+within the same filing session), not an OCR problem or a mistake in this project's reading.
+`[R]` Consequence for routing: **`typeRdd` cannot be the sole or primary signal**, even where
+present — it must be corroborated by content, not merely trusted. This also means §4.1's
+original P0 priority for `…ec2` ("PV d'assemblée · **Augmentation du capital**") was assigned by
+trusting `typeRdd` rather than by the content this same project had already read in an earlier
+turn; the correction is that `…ec2` is P0 for **share transfer**, not for capital amount, and
+`…ec4` — not `…ec2` — is where the augmentation is grounded, exactly as §4.2's golden chain
+already has it.
+
+**`[F]` A real false-positive class in this project's own tool was found and fixed during
+measurement, not before it.** The bare word `"ceder"` (to cede), searched as a plain substring
+first, matched inside `"excéder"` and `"procéder"` — 12 of 17 ARCHEAN documents, all wrong.
+Word-boundary anchoring (`\bceder\b`, still exact matching, not fuzzy) corrected this to 2 false
+positives, both genuine (the statutory *cession* clause, present in every updated-statutes
+document regardless of whether that specific acte enacts a cession). `[R]` Every phrase in
+`scripts/analyze_routing.py` now matches on word boundaries; single short root words remain the
+highest-risk case for this class of error and should be checked individually before trusting
+them, exactly as this one was.
+
+**`[F]` Boilerplate is the dominant false-positive source, and it is now measured, not
+suspected.** ARCHEAN's updated statutes recite Article 8 ("Le capital social peut être
+augmenté...") and Article 15 (cession/transmission rules) in **every** acte that reprints the
+statutes, whether or not that acte enacts a capital or transfer event. Measured directly:
+`"augmentation de capital"` and `"augmentation du capital"` both occur in several non-target
+documents purely from this boilerplate (FP=6 and FP=3 respectively, out of 11 non-target ARCHEAN
+documents). `"cession"` alone is similarly poor for `share_transfer` (FP=10 of 15) for the same
+reason — the transfer-restriction clause is generic statutory boilerplate, not evidence of an
+actual transfer in that specific acte.
+
+**`[F]` Recall/precision trade off across candidates, measured with `analyze_routing.py gold`
+on 2026-09-16, ARCHEAN's 17 documents (7 `capital_amount`, 2 `share_transfer`, both classes
+overlapping on `…ec7`):**
+
+| phrase | class | TP | FP | FN | TN |
+|---|---|--:|--:|--:|--:|
+| `reduction du capital` | capital_amount | 7 | 3 | 0 | 7 |
+| `valeur nominale` | capital_amount | 7 | 5 | 0 | 5 |
+| `prime d'émission` | capital_amount | 7 | 5 | 0 | 5 |
+| `capital social est fixé` | capital_amount | 6 | 3 | 1 | 7 |
+| `il est divisé en` | capital_amount | 6 | 3 | 1 | 7 |
+| `actions nouvelles` | capital_amount | 6 | 4 | 1 | 6 |
+| `augmentation de capital` | capital_amount | 6 | 6 | 1 | 4 |
+| `augmentation du capital` | capital_amount | 4 | 3 | 3 | 7 |
+| `pour le porter de` | capital_amount | 1 | 0 | 6 | 10 |
+| `cession` | share_transfer | 2 | 10 | 0 | 5 |
+| `ordres de mouvement` | share_transfer | 1 | 0 | 1 | 15 |
+| `protocole de cession` | share_transfer | 1 | 0 | 1 | 15 |
+| `nouvel actionnaire` | share_transfer | 1 | 0 | 1 | 15 |
+| `céder` | share_transfer | 1 | 2 | 1 | 13 |
+
+`[F]` No single tested phrase reaches TP = all-targets, FP = 0 simultaneously for either class,
+at ARCHEAN's scale. `[I]` The most useful pattern observed is **complementary, not competing**
+signals: `reduction du capital` alone has perfect recall (FN=0) for capital_amount; `pour le
+porter de` has perfect precision (FP=0) but recall 1/7 — the operative "before → after" template
+is genuinely phrased differently across resolutions (`"pour le porter de X à Y"` in `…ec7`,
+`"pour porter le capital à Y"` in `…ec4`, or omitted entirely in favour of a standalone
+`"Le capital social est fixé à Y"` clause in most others) — confirmed by reading all six FN
+documents directly, not inferred from the count alone. `[R]` A routing rule built on this
+evidence would need several corroborating phrases per class, not one, and should not expect a
+zero-FP single-phrase rule to exist for `capital_increase` specifically — the statutory
+boilerplate makes that combination of words unavoidably ambiguous on its own.
+
+**`[F]` Cross-line phrase splitting is real and quantified, not assumed — and it did not change
+any bucket above.** Joining every pair of adjacent same-page OCR lines and re-testing the same
+18 candidate phrases against all 17 ARCHEAN documents surfaces **41 occurrences that single-line
+matching misses entirely** (e.g. `…ec5` p.21: `"...l'augmentation de"` / `"capital de la société
+est réalisée..."` — a real occurrence of `augmentation de capital` invisible to single-line
+search). `[F]` Every one of the 41 is boilerplate (`associé unique`, `commissaire aux comptes`,
+`assemblée générale` procedural clauses) — none is a target-class-defining phrase whose only
+occurrence was hidden this way, so **none of the TP/FP/FN/TN counts in the table above change**
+if lines are joined. `[R]` This is a real property of the representation, not a non-issue: a
+future candidate phrase, especially a longer or rarer one, could have its only occurrence split
+this way. `extract_document_text`/`phrase_present` in any future `route.py` should join adjacent
+same-page lines (or search a sliding two-line window) rather than match single lines only — this
+measurement is the justification, not intuition about typeset line wrapping.
+
+**`[F]` The two P0 `typeRdd`-empty documents behave completely differently under content
+inspection — this was the central open question of the task, and it is now answered with
+evidence, not left as an assumption:**
+
+| document | `typeRdd` | capital-specific phrases found | golden-chain relevant | interpretation |
+|---|---|---|---|---|
+| `…ec4` (2006-01-03) | empty | `"capital social est fixé"` (×2), `"augmentation de capital"` (×11, including `"réalisation définitive de l'augmentation de capital de 113 000 €"`), `"il est divisé en"`, `"actions nouvelles"` | **yes** — is the `capital_amount` source for the 2005-05-17 row of the golden chain | `[O]` observed: this document's empty `typeRdd` hides a real, load-bearing capital event. Confidence: **high** — multiple independent operative phrases, already cross-checked against the golden chain in an earlier turn. |
+| `8925` (2025-12-02) | empty | **none** of `capital social est fixé`, `pour le porter de`, `augmentation de/du capital`, `il est divisé en`, `actions nouvelles`, `réduction du capital`, `cession`, `associé unique` — zero hits, all twelve probes | **no** — recorded in the golden chain as an `independent_observation` (confirms the end state, no capital movement) | `[O]` observed: this document's empty `typeRdd` correctly reflects that nothing capital-related happens in it. It contains only `"assemblée générale"`, `"président"` and `"commissaire aux comptes"` boilerplate (approving 2023 accounts). Confidence: **high** — twelve independent negative probes, corroborated by the golden chain having already treated it as a non-event. |
+
+`[R]` The two P0 documents are **not the same kind of gap**. `…ec4` is a genuine metadata blind
+spot that content reading closes with high confidence. `8925` is not a gap at all — its empty
+`typeRdd` and its empty content-probe result agree. A routing rule that treated "empty `typeRdd`"
+as itself a signal of importance would have been wrong for one of the two documents it was
+built to handle.
 
 ---
 

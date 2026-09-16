@@ -132,6 +132,35 @@ which occur in the real corpus) and records real-but-benign facts as non-fatal `
 reproducible half of DISCOVERY.md §4.1 — everything except "capital in header" and "priority",
 which need document content and stay hand-verified. See DISCOVERY.md §4.1-V.
 
+## Routing evidence — not routing itself
+
+`route.py` does not exist yet. `scripts/analyze_routing.py` measures candidate phrases against
+two label sources (ARCHEAN's own 17 hand-verified documents; a noisy `typeRdd`-derived label
+across all 20 companies) and prints raw TP/FP/FN/TN — never a score, never a ranking, never a
+routing decision. See DISCOVERY.md §8.4 before adding a candidate phrase or trusting one already
+there; the table is dated and was produced by a specific command, not asserted from memory.
+
+Facts worth not re-discovering:
+- **`typeRdd` is not reliably scoped to its own PDF.** `…ec2`'s `typeRdd` claims "Augmentation
+  du capital social"; its OCR text has none. The real augmentation is in the adjacently-filed
+  `…ec4`, whose `typeRdd` is empty. Never trust `typeRdd` alone; corroborate with content.
+- **Word-boundary matching, not plain substring.** `"ceder"` as a plain substring matches inside
+  `"excéder"`/`"procéder"` — found as a real bug during measurement, not hypothesized. Any phrase
+  search must anchor on `\b`.
+- **Boilerplate is the dominant false-positive source.** Article 8 (capital) and Article 15
+  (cession) of the statutes are reprinted in every acte that includes updated statutes, whether
+  or not that acte enacts the event. No single capital/cession phrase reaches FP=0 at recall>1.
+- **Cross-line splitting is real (41 measured instances) but boilerplate-only so far** — it has
+  not yet flipped a target-class bucket, but a future `extract_text` should join adjacent
+  same-page lines rather than match single lines, because this was measured, not assumed safe.
+- **`…ec4` and `8925` (both typeRdd-empty) are not the same kind of gap.** `…ec4` hides a real
+  capital event (11 independent phrase hits, already in the golden chain). `8925` genuinely has
+  none (zero hits across twelve probes) — its empty `typeRdd` is correct, not a gap.
+- `_reocr_*` diagnostic pages are 18.5% of the *whole* corpus (738/3995), not the 3.4%
+  (10/293) this project measured for ARCHEAN alone — both figures are real, scoped differently.
+- `layout` is non-empty on 53% of all OCR pages corpus-wide (table detection, mostly on
+  `bilans`) but **empty on all 293 of ARCHEAN's own actes pages**, with no exception.
+
 ## Commands
 
 All verified to run from this directory.
@@ -143,6 +172,11 @@ python -m pytest -q
 # regenerate the reproducible half of DISCOVERY.md §4.1 from the corpus
 python scripts/inventory.py
 python scripts/inventory.py --root path/to/data/<siren>/actes --format json
+
+# measure a routing signal — see DISCOVERY.md §8.4 before trusting a number
+python scripts/analyze_routing.py p0
+python scripts/analyze_routing.py gold
+python scripts/analyze_routing.py signal "reduction du capital" --gold-class capital_amount
 
 # where does a phrase sit on a page, in submittable coordinates?
 python ../engineering-challenges/tools/bbox_viewer.py \
