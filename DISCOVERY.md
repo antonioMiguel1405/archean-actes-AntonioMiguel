@@ -2433,3 +2433,187 @@ Immediately after, in order: `ground.py` + `test_bbox.py` (provenance de-risked 
 it is the graded artefact), then routing, then extraction.
 
 **Awaiting your approval before implementing anything.**
+
+*(Superseded by §23 — the plan above was executed in full, across the sessions that produced
+§4 through §8.10 and, finally, `results.json` itself.)*
+
+---
+
+## 23. Closing session — event extraction, timeline reconstruction, `results.json`
+
+`[F]` marks a fact directly observed in the corpus or measured by running code. `[I]` marks
+an inference drawn from those facts. `[H]` marks something explicitly NOT asserted, recorded
+so it cannot be mistaken for a fact later. `[U]` marks a finding that changes an earlier
+section's conclusion.
+
+### 23.1 What this session added, and what it deliberately reused unchanged
+
+`[F]` `archean/corpus.py`, `archean/frenchnum.py` and `archean/route.py` are **untouched** by
+this session (`git status` at commit time shows zero modifications to any of the three) — the
+event-extraction layer consumes their existing, already-tested public contracts (`load_corpus`,
+`classify`, `Grounder`) rather than reopening them. Two new modules were added:
+
+- **`archean/timeline.py`** — company-agnostic. `Event`, `Holder`, `CapTableState`,
+  `build_timeline`, `check_invariants`. Tested with 16 synthetic scenarios
+  (`tests/test_timeline.py`) that need no corpus at all — Decimal/int arithmetic, same-day
+  event ordering, the two-invariant check, and the explicit "unattributed holder" pattern for a
+  known total with an unknown split.
+- **`scripts/build_results.py`** — ARCHEAN-specific by design (the brief only ever asks for
+  480489707's own `results.json`). Cites the capital deltas and shareholder facts this project
+  has read directly, re-grounds every citation live against the real PDF/OCR via
+  `archean.ground.Grounder` at build time, and cross-checks every capital event against
+  `route.py`'s own, independently-computed `OPERATIVE` verdict before citing it.
+- **`scripts/validate_results.py`** — schema validation (`jsonschema.Draft202012Validator`
+  against the challenge's own `results.schema.json`) plus the two internal invariants, run as a
+  second, independent pass over the finished file, not just at generation time.
+
+### 23.2 Design decision: what "evidence-based" means for the shareholder side
+
+`[H]` This session explicitly did **not** attempt to build a generic, validated holder-table
+extractor (the OCR-interleaved-column geometry problem CLAUDE.md's corpus facts already
+flag) within its own time budget. Doing so to this project's own evidentiary bar — corpus-wide
+measurement, a written audit, regression tests — is a multi-session undertaking in its own
+right, and half of one, done under pressure, was judged a worse outcome than an honestly-scoped
+partial answer (the brief's own stated preference).
+
+`[F]` What was done instead: `capital_amount` events are 100% code-derived (`route.py`'s
+`OPERATIVE` verdict, cross-checked live at build time — see 23.3). `SHAREHOLDER_END` events (7)
+and `CAPITAL_DUAL_CLASS` events (2) were sourced by this session's own direct reading of the
+relevant pages, each citation re-verified live the same way the capital events are (a moved or
+invented snippet fails the build, not silently). No `SHAREHOLDER_ENTRY` or
+`SHAREHOLDER_SHARE_TRANSFER` event was emitted at all — see 23.4.
+
+`[I]` This is the same division of labour CLAUDE.md's original LLM Strategy (§9) always
+described for this project — a reader identifies the fact and its citation, code does every
+number, every date comparison, every bbox and every invariant check — except the "reader" here
+was this session's own direct corpus reading rather than a scripted LLM call. The project's
+`cache/llm/` convention (§9, `.gitignore`) was never exercised because no LLM extraction
+pipeline was built at all (§23.6).
+
+### 23.3 New facts found and grounded this session
+
+`[F]` **The GUELLATI/LEROUX/ROUJEAN exit, grounded for the first time.**
+`tests/golden_capital_chain.json` (an earlier session) already noted, in prose, that three
+shareholders "appear out of nowhere, hold shares for ~3 months, and leave" — but carried no
+citation for it, because that fact was outside what its own `chain[]` rows (capital deltas)
+needed. This session searched the whole ARCHEAN corpus for the three names directly
+(`Grounder.search`) and found:
+- `…ec4` p.1 (the 2005-05-17 AGE realising the +113 000 EUR increase): "Monsieur Malik
+  GUELLATTI et Monsieur Christophe LEROUX, associés représentant tant..." — both named as
+  **associés** (shareholders) that day, before the capital-increase resolution that follows in
+  the same document.
+- `…ec2` p.6 (filed 2006-01-04): "Ratification d'un protocole de cession d'actions dérogeant
+  aux statuts pour la totalité des actions détenues par Messieurs Malik GUELLATI, Christophe
+  LEROUX et Madame Marielle ROUJEAN, associés d'ARCHEAN TECHNOLOGIES" — a protocol ratifying
+  the cession of **the totality** of their shares, effective via "ordres de mouvement à émettre
+  en date du 16 août 2005."
+
+`[I]` This grounds three `SHAREHOLDER_END` events (2005-08-16) with high confidence on the
+departure itself. `[H]` It does **not** ground a `SHAREHOLDER_ENTRY` for any of the three: no
+document in this corpus states when or how they acquired their shares — the same gap
+`tests/golden_capital_chain.json`'s own `unresolved[]` list already named for the 2005-05-17
+increase's subscribers. Not resolved by this session; recorded, not guessed.
+
+`[F]` **The four-fund buyback, individually grounded.** `…ebe` p.3 (2017-02-21) names all four
+funds with exact share counts summing to 150 861: FPCI SECURITE 64 655, FIP GALIA PME 4 12 931,
+GALIA VENTURE 30 172, FPCI FINANCIERE DE BRIENNE 43 103 — matching
+`tests/golden_capital_chain.json` seq 8's prose note exactly, now with a live-verified citation.
+Four `SHAREHOLDER_END` events, `shares` populated (unlike the 2005 three, these counts ARE
+stated).
+
+`[F]` **Two `CAPITAL_DUAL_CLASS` events found and emitted** (unscored, per event_codes.json, but
+"emit it if you spot it, ignore it at no cost"): `…ec3` p.2, 6th and 8th resolutions,
+"Création d'actions de préférence de catégorie A" and "Création d'actions de préférence de
+catégorie B et B'" — matching event_codes.json's own trigger phrase
+("Création d'une/deux nouvelle(s) catégorie(s) d'actions de préférence dites <CODES>")
+almost verbatim.
+
+### 23.4 Why no `SHAREHOLDER_SHARE_TRANSFER` or `SHAREHOLDER_ENTRY` event exists
+
+`[F]` The only candidate in this corpus is the 2005-08-16 reallocation. `…ec2` p.6 gives a
+**result table** — "Il en résulte au terme des ordres de mouvement..., la nouvelle répartition
+suivante entre les associés: BLANCO 823 actions, AUMONT 617 actions, GICQUEL 60 actions" — not
+seller→buyer instructions. `event_codes.json`'s `SHAREHOLDER_SHARE_TRANSFER` payload requires
+exactly one `from_name`, one `to_name`, one `shares` count. `[H]` Deriving that from an
+aggregate table would require assuming a split the document does not state — exactly the kind
+of invention CLAUDE.md rule 1 forbids, so it was not attempted. `[I]` `SHAREHOLDER_ENTRY` is
+symmetric: BLANCO/AUMONT/GICQUEL were already associés before this reallocation (present since
+constitution), so nothing "enters" here; the closest thing to an entry event in this corpus (the
+2005-05-17 increase's unnamed subscribers) has no name to attach an ENTRY event to at all.
+
+`event_codes.json` itself anticipates that `SHAREHOLDER_ENTRY`/`SHAREHOLDER_END` are usually
+**derived**, not directly stated ("Most often *reconstructed* by diffing the pre- and post-act
+capital-allocation article rather than stated by an explicit phrase") — this session's design
+follows that: `SHAREHOLDER_END` was derivable (an explicit "cession of the totality" statement,
+diffed against the constitution's holder list); a pairwise `SHAREHOLDER_SHARE_TRANSFER` for the
+same movement was not, and is not invented to fill the gap.
+
+### 23.5 Cross-checks performed, and what they confirmed
+
+`[F]` Every one of the 6 capital events is asserted, at build time, to be
+`route.py`-`OPERATIVE` for `capital_amount`, with the cited fragment actually present in
+`route.py`'s own evidence text (`scripts/build_results.py`'s `assert_route_agrees`) — this
+caught one real mismatch during construction (this session originally cited `…ec3`'s p.8
+statute-recital lines for the two 2008-06-27 increases; `route.py`'s own `OPERATIVE` evidence
+is the p.2/p.3 decision lines instead — both are real, both say the same amount, but only the
+decision lines are what `route.py` itself calls operative, so those became the primary
+citation, with the p.8 recital kept as a corroborating detail in the event's `note`).
+
+`[F]` Every citation in `results.json` is re-grounded live against the real OCR at build time
+(`Grounder.locate` must return a hit, or the build raises) — not merely typed once and trusted.
+Two typos were caught exactly this way during construction (a guessed "Associée Unique de la
+société ARCHEAN TECHNOLOGIE" preamble that does not occur verbatim; a two-line span mistaken for
+one OCR line in `…ec0`) and both were corrected against the real text before this section was
+written, not worked around.
+
+`[F]` `python scripts/build_results.py` run twice, independent processes: **byte-identical**
+`results.json` (`tests/test_results.py::test_build_results_is_byte_identical_across_independent_runs`).
+`[F]` `python scripts/validate_results.py` passes both jsonschema validation
+(`results.schema.json`, `Draft202012Validator`) and this project's own internal invariants.
+
+`[F]` `python scripts/validate_routing.py rules` (ARCHEAN's own gold) and
+`python scripts/gold_compare.py` (the independent JACQUES BOCKEL gold), re-run after adding
+this session's code: **unchanged** — TP=5/FP=0/FN=2/TN=10 and 11/14 respectively, confirming
+this session touched nothing in the routing/parsing layers that the earlier sessions' own
+regression suites already protect.
+
+### 23.6 What `results.json` actually contains — proven, not promotional
+
+`[F]` 15 `events[]` (6 capital, 7 `SHAREHOLDER_END`, 2 `CAPITAL_DUAL_CLASS`), 9
+`capital_timeline[]` rows, spanning 2004-12-15 (constitution) to 2018-03-23 (the last capital
+change in this corpus — the 2024 AG confirms 400 000 EUR unchanged,
+`tests/golden_capital_chain.json`'s own `independent_observations`). `[H]` These counts are not
+a score and are not presented as one — `capital_amount` is measured at 7/7 agreement against the
+independent gold set (§8.10) for a *different* company's documents, which says something about
+the router's precision, not about how complete ARCHEAN's own `results.json` is; completeness
+here is bounded by what this corpus actually documents, which §9's Limitations (`README.md`)
+lists without euphemism.
+
+`[F]` **No LLM call exists anywhere in the shipped pipeline.** `archean/` and `scripts/` were
+grepped for `fuzzy|similarity|embedding|\bllm\b|\bmodel\b|confidence|score|probability|doc_id|
+company_id|hardcoded` (case-insensitive) and every hit read, not just pattern-matched — every
+occurrence is either a docstring stating the absence, or a legitimate unrelated use (OCR's own
+per-line `score` field, used only to filter empty-text lines; `doc_id` used only for identity/
+indexing/reporting, never for verdict branching, independently verified by an AST test).
+`§9`'s original LLM Strategy plan (committing a `cache/llm/` response cache) was never
+exercised — the deterministic approach answered the challenge's own stated grading criteria
+(traceability, internal coherence, honesty about gaps) without it.
+
+### 23.7 Remaining limitations — explicit, not resolved here
+
+`[H]` Not claimed solved:
+- No generic, validated shareholder/holder-table extractor exists — `SHAREHOLDER_ENTRY` and
+  `SHAREHOLDER_SHARE_TRANSFER` are absent from `results.json` for this reason, not because the
+  mechanism in `archean/timeline.py` cannot represent them (it can, and is tested against
+  synthetic instances of both).
+- The GUELLATI/LEROUX/ROUJEAN entry date/mechanism, the 823-vs-803 BLANCO contradiction, the
+  2008-2017 category-B holder identity, and the HADEAN-acquisition mechanism are all genuine,
+  unresolved corpus gaps — carried into `results.json`'s own `notes` field verbatim, not
+  smoothed over.
+- Cross-line OCR date splitting (§8.9) remains open.
+- The bonus `group.nodes`/`group.edges` was not attempted.
+
+See `README.md` §9 for the same list written for a reviewer rather than for this file's own
+audit trail.
+
+---

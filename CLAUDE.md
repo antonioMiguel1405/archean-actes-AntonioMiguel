@@ -301,6 +301,14 @@ python scripts/analyze_routing.py p0
 python scripts/analyze_routing.py gold
 python scripts/analyze_routing.py signal "reduction du capital" --gold-class capital_amount
 
+# cross-corpus routing validation, and the independent gold comparison
+python scripts/validate_routing.py rules
+python scripts/gold_compare.py
+
+# regenerate results.json from the corpus (DISCOVERY.md §23)
+python scripts/build_results.py
+python scripts/validate_results.py
+
 # where does a phrase sit on a page, in submittable coordinates?
 python ../engineering-challenges/tools/bbox_viewer.py \
     --pdf ../engineering-challenges/data/480489707/actes/pdf/<file>.pdf \
@@ -333,27 +341,47 @@ Rules for it:
   oracle to match the code destroys the only independent check we have.
 - Contradictions live in `independent_observations` and `unresolved`, not folded away.
 
-## Definition of done
+## Definition of done — MET, as of the closing session (`DISCOVERY.md` §23)
 
 Only requirements actually stated by the challenge, plus the checks we chose:
 
-- `results.json` at the repo root, `siren` exactly `"480489707"`, validating against
-  `results.schema.json` — the brief warns a submission they cannot parse cannot be scored.
-- Every event carries `source.inpi_id`, `source.page`, `source.bbox`; ungrounded events are
-  still reported, with a note saying they are ungrounded (the brief permits this explicitly).
-- `README.md` covering: how to run it, trade-offs, **"How I used AI"**, what could not be
-  resolved, what we would do next, and the link to a ~3-minute screen recording.
-- `.env.example` naming every environment variable the code reads, with **names only, no
-  values**. If the pipeline needs no keys, say so — the brief calls that a legitimate answer.
-- `.env` absent from the repo and present in `.gitignore`.
-- `python -m pytest -q` green.
+- [x] `results.json` at the repo root, `siren` exactly `"480489707"`, validating against
+  `results.schema.json` — `scripts/validate_results.py` checks both this and this project's
+  own internal invariants (holder-sum, capital = shares × nominal), and runs in CI-equivalent
+  form as `tests/test_results.py`.
+- [x] Every event carries `source.inpi_id`, `source.page`, `source.bbox`, re-grounded live
+  against the real PDF/OCR at build time (`scripts/build_results.py`'s `ground()`), not
+  trusted as typed. No event in the current `results.json` is ungrounded — if one ever needs
+  to be, the brief's explicit contract for that case (still report it, with a note) is honoured
+  by the schema's `additionalProperties: true` on `payload`, not yet exercised because it has
+  not been needed.
+- [x] `README.md` covering: how to run it, trade-offs, **"How I used AI"**, what could not be
+  resolved, what would be done next. The ~3-minute screen recording is explicitly NOT part of
+  what an AI closing session produces — see the final prompt's own scope boundary.
+- [x] `.env.example` naming the one environment variable the code reads
+  (`ARCHEAN_CHALLENGE_ROOT`, a local path, not a secret) — no API keys, no tokens, no model
+  names anywhere in `archean/` or `scripts/` (verified by grep + direct reading, `DISCOVERY.md`
+  §23.6).
+- [x] `.env` absent from the repo and present in `.gitignore`.
+- [x] `python -m pytest -q` green (622 as of the closing session).
 
-## LLM policy
+**Not claimed**: "fully solved", "100% accurate", "production-ready". `README.md` §9 lists
+real, current limitations — most notably, no `SHAREHOLDER_ENTRY`/`SHAREHOLDER_SHARE_TRANSFER`
+events exist (the one candidate in this corpus is an aggregate result table, not pairwise
+transfer instructions — inventing a split was refused, not attempted and forgotten).
 
-The LLM reads French and interprets resolutions on a page we hand it. It returns
-`evidence_line_ids` plus a verbatim `snippet`. Code then checks the snippet really occurs in
-that page's OCR and computes the bbox from the cited lines. An extraction whose snippet does
-not match is rejected, not repaired.
+## LLM policy — planned, not built
+
+This section originally specified an LLM extraction layer (read a resolution on a cited page,
+return `evidence_line_ids` + a verbatim `snippet`, code verifies and computes the bbox, a
+mismatched snippet is rejected not repaired) with a committed `cache/llm/` response cache
+(`.gitignore` still names it, deliberately un-ignored, for exactly this reason). **It was never
+implemented.** The router (`archean/route.py`) and the event/timeline layer
+(`scripts/build_results.py`, `archean/timeline.py`) turned out to answer the challenge's own
+stated grading criteria — traceability, internal coherence, honesty about gaps — fully
+deterministically, without an LLM call anywhere in the shipped pipeline. `cache/llm/` does not
+exist because nothing ever wrote to it; this is a design outcome, not an oversight, and is
+recorded (not silently dropped) here and in `README.md`'s "How I used AI" section.
 
 Temperature 0. Every response cached to `cache/llm/` and **committed**, so a reviewer can
 reproduce `results.json` with no API key.

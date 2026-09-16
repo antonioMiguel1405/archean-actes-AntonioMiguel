@@ -1,0 +1,494 @@
+{
+  "siren": "480489707",
+  "events": [
+    {
+      "event_id": "evt-inc-2005-05-17",
+      "event_code": "CAPITAL_INCREASE",
+      "event_date": "2005-05-17",
+      "payload": {
+        "amount_eur": 113000,
+        "method": "numeraire"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec4",
+        "page": 2,
+        "bbox": [
+          0.1216,
+          0.7837,
+          0.8896,
+          0.7998
+        ],
+        "snippet": "réalisation définitive de l'augmentation de capital de 113 000 € par la création de 1 130"
+      },
+      "note": "Réalisation définitive — the deciding AGE (2005-03-04) is not in this corpus (see notes). Subscribers are not named anywhere in it."
+    },
+    {
+      "event_id": "evt-end-guellati-2005",
+      "event_code": "SHAREHOLDER_END",
+      "event_date": "2005-08-16",
+      "payload": {
+        "holder_name": "Malik GUELLATI"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec2",
+        "page": 6,
+        "bbox": [
+          0.1663,
+          0.2666,
+          0.8714,
+          0.2798
+        ],
+        "snippet": "Ratification d'un protocole de cession d’actions dérogeant aux statuts pour la totalité des"
+      },
+      "note": "Protocole de cession of the totality of this associé's shares, ratified 2006-01-04, effective via ordres de mouvement dated 2005-08-16. Confirmed as an associé on 2005-05-17 (`…ec4` p.1 lists this person as présent/scrutateur). Share count not stated anywhere in this corpus."
+    },
+    {
+      "event_id": "evt-end-leroux-2005",
+      "event_code": "SHAREHOLDER_END",
+      "event_date": "2005-08-16",
+      "payload": {
+        "holder_name": "Christophe LEROUX"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec2",
+        "page": 6,
+        "bbox": [
+          0.1663,
+          0.2666,
+          0.8714,
+          0.2798
+        ],
+        "snippet": "Ratification d'un protocole de cession d’actions dérogeant aux statuts pour la totalité des"
+      },
+      "note": "Protocole de cession of the totality of this associé's shares, ratified 2006-01-04, effective via ordres de mouvement dated 2005-08-16. Confirmed as an associé on 2005-05-17 (`…ec4` p.1 lists this person as présent/scrutateur). Share count not stated anywhere in this corpus."
+    },
+    {
+      "event_id": "evt-end-roujean-2005",
+      "event_code": "SHAREHOLDER_END",
+      "event_date": "2005-08-16",
+      "payload": {
+        "holder_name": "Marielle ROUJEAN"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec2",
+        "page": 6,
+        "bbox": [
+          0.1663,
+          0.2666,
+          0.8714,
+          0.2798
+        ],
+        "snippet": "Ratification d'un protocole de cession d’actions dérogeant aux statuts pour la totalité des"
+      },
+      "note": "Protocole de cession of the totality of this associé's shares, ratified 2006-01-04, effective via ordres de mouvement dated 2005-08-16. Confirmed as an associé on 2005-05-17 (`…ec4` p.1 lists this person as présent/scrutateur). Share count not stated anywhere in this corpus."
+    },
+    {
+      "event_id": "evt-inc-2006-10-20",
+      "event_code": "CAPITAL_INCREASE",
+      "event_date": "2006-10-20",
+      "payload": {
+        "amount_eur": 50000,
+        "method": "numeraire"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec7",
+        "page": 3,
+        "bbox": [
+          0.0499,
+          0.1685,
+          0.9479,
+          0.1841
+        ],
+        "snippet": "d'augmenter le capital social d'une somme de 50.000 euros, pour le porter de 150.000 euros"
+      },
+      "note": "Effective date UNCERTAIN: beneficiaries had until 2006-11-16 to subscribe; no constatation act is in this corpus. Uses the AGE date, as the 2008 statutes recital does."
+    },
+    {
+      "event_id": "evt-dualclass-01",
+      "event_code": "CAPITAL_DUAL_CLASS",
+      "event_date": "2008-06-27",
+      "payload": {
+        "class_name": "Actions de préférence de catégorie A",
+        "description": "Created alongside the 17 241 EUR increase, all subscribed by HADEAN."
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec3",
+        "page": 2,
+        "bbox": [
+          0.3228,
+          0.3901,
+          0.685,
+          0.4083
+        ],
+        "snippet": "Création d’actions de préférence de catégorie A"
+      }
+    },
+    {
+      "event_id": "evt-dualclass-02",
+      "event_code": "CAPITAL_DUAL_CLASS",
+      "event_date": "2008-06-27",
+      "payload": {
+        "class_name": "Actions de préférence de catégorie B et B'",
+        "description": "Created alongside the 150 861 EUR increase; subscribers not named in this corpus."
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec3",
+        "page": 2,
+        "bbox": [
+          0.3013,
+          0.5947,
+          0.7008,
+          0.6129
+        ],
+        "snippet": "Création d’actions de préférence de catégorie B et B'"
+      }
+    },
+    {
+      "event_id": "evt-inc-2008-06-27-a",
+      "event_code": "CAPITAL_INCREASE",
+      "event_date": "2008-06-27",
+      "payload": {
+        "amount_eur": 17241,
+        "method": "numeraire"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec3",
+        "page": 2,
+        "bbox": [
+          0.116,
+          0.9224,
+          0.8765,
+          0.944
+        ],
+        "snippet": "DÉciDE d'augmenter le capital social de la Société d'un montant nominal de 17.241 euros, par"
+      },
+      "note": "\"Augmentation de Capital I\" — Actions de préférence de catégorie A, all subscribed by HADEAN. The updated Article 7 on p.8 confirms the resulting total: \"de 17.241 euros afin d'être porté à 217.241 euros.\""
+    },
+    {
+      "event_id": "evt-inc-2008-06-27-b",
+      "event_code": "CAPITAL_INCREASE",
+      "event_date": "2008-06-27",
+      "payload": {
+        "amount_eur": 150861,
+        "method": "numeraire"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec3",
+        "page": 3,
+        "bbox": [
+          0.1173,
+          0.7915,
+          0.88,
+          0.8112
+        ],
+        "snippet": "d’augmenter le capital social d'un montant nominal de 150.861 euros par l'émission de 150.861"
+      },
+      "note": "\"Augmentation de Capital II\" — Actions de préférence de catégorie B/B'. This filed extrait omits the subscriber resolutions; who held the 150 861 B shares 2008-2017 is not stated in this corpus. The updated Article 7 on p.8 confirms the resulting total: \"de 150.861 euros afin d'être porté à 368.102 euros.\""
+    },
+    {
+      "event_id": "evt-dec-2017-02-21",
+      "event_code": "CAPITAL_DECREASE",
+      "event_date": "2017-02-21",
+      "payload": {
+        "amount_eur": 150861,
+        "method": "rachat et annulation d'actions"
+      },
+      "source": {
+        "inpi_id": "63e9593a8be6eb9f9d257ebe",
+        "page": 3,
+        "bbox": [
+          0.1137,
+          0.3993,
+          0.8801,
+          0.4176
+        ],
+        "snippet": "être ramené de 368 102 euros à 217 241 euros et divisé en 217 241 actions de 1 euro de valeur"
+      },
+      "note": "Category-B shares bought back from 4 funds and cancelled (L.225-205 régime). Realised by the Président; the AGE that AUTHORISED it sat 2017-01-19 without itself changing capital."
+    },
+    {
+      "event_id": "evt-end-fip-galia-pme4-2017",
+      "event_code": "SHAREHOLDER_END",
+      "event_date": "2017-02-21",
+      "payload": {
+        "holder_name": "FIP GALIA PME 4",
+        "shares": 12931
+      },
+      "source": {
+        "inpi_id": "63e9593a8be6eb9f9d257ebe",
+        "page": 3,
+        "bbox": [
+          0.1117,
+          0.2178,
+          0.8793,
+          0.2374
+        ],
+        "snippet": "Le Président arrête le montant des actions rachetées par la Société à 150 861 et fixe la liste"
+      },
+      "note": "Shares bought back by the company and cancelled — co-fires the CAPITAL_DECREASE the same day."
+    },
+    {
+      "event_id": "evt-end-fpci-brienne-2017",
+      "event_code": "SHAREHOLDER_END",
+      "event_date": "2017-02-21",
+      "payload": {
+        "holder_name": "FPCI FINANCIERE DE BRIENNE",
+        "shares": 43103
+      },
+      "source": {
+        "inpi_id": "63e9593a8be6eb9f9d257ebe",
+        "page": 3,
+        "bbox": [
+          0.1117,
+          0.2178,
+          0.8793,
+          0.2374
+        ],
+        "snippet": "Le Président arrête le montant des actions rachetées par la Société à 150 861 et fixe la liste"
+      },
+      "note": "Shares bought back by the company and cancelled — co-fires the CAPITAL_DECREASE the same day."
+    },
+    {
+      "event_id": "evt-end-fpci-securite-2017",
+      "event_code": "SHAREHOLDER_END",
+      "event_date": "2017-02-21",
+      "payload": {
+        "holder_name": "FPCI SECURITE",
+        "shares": 64655
+      },
+      "source": {
+        "inpi_id": "63e9593a8be6eb9f9d257ebe",
+        "page": 3,
+        "bbox": [
+          0.1117,
+          0.2178,
+          0.8793,
+          0.2374
+        ],
+        "snippet": "Le Président arrête le montant des actions rachetées par la Société à 150 861 et fixe la liste"
+      },
+      "note": "Shares bought back by the company and cancelled — co-fires the CAPITAL_DECREASE the same day."
+    },
+    {
+      "event_id": "evt-end-galia-venture-2017",
+      "event_code": "SHAREHOLDER_END",
+      "event_date": "2017-02-21",
+      "payload": {
+        "holder_name": "GALIA VENTURE",
+        "shares": 30172
+      },
+      "source": {
+        "inpi_id": "63e9593a8be6eb9f9d257ebe",
+        "page": 3,
+        "bbox": [
+          0.1117,
+          0.2178,
+          0.8793,
+          0.2374
+        ],
+        "snippet": "Le Président arrête le montant des actions rachetées par la Société à 150 861 et fixe la liste"
+      },
+      "note": "Shares bought back by the company and cancelled — co-fires the CAPITAL_DECREASE the same day."
+    },
+    {
+      "event_id": "evt-inc-2018-03-23",
+      "event_code": "CAPITAL_INCREASE",
+      "event_date": "2018-03-23",
+      "payload": {
+        "amount_eur": 182759,
+        "method": "incorporation de reserves"
+      },
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec0",
+        "page": 2,
+        "bbox": [
+          0.1061,
+          0.7043,
+          0.8781,
+          0.7243
+        ],
+        "snippet": "L'Associée Unique décide d’augmenter le capital social d’un montant de 182 759 euros par"
+      },
+      "note": "The updated statutes' own Article 6 (p.3 and p.7) misstate this as \"185 759\" — confirmed by rendering the page directly: a drafting error in the source document, not an OCR artefact. 182 759 is used because it is what the operative decision states (twice) and because 217 241 + 182 759 = 400 000 exactly."
+    }
+  ],
+  "capital_timeline": [
+    {
+      "as_of": "2004-12-15",
+      "capital_eur": 37000.0,
+      "shares_total": 370,
+      "nominal_eur": 100.0,
+      "holders": [
+        {
+          "name": "Xavier AUMONT",
+          "kind": "PERSON",
+          "shares": 155
+        },
+        {
+          "name": "Antonio BLANCO MARINA",
+          "kind": "PERSON",
+          "shares": 155
+        },
+        {
+          "name": "Franck GICQUEL",
+          "kind": "PERSON",
+          "shares": 60
+        }
+      ],
+      "caused_by": []
+    },
+    {
+      "as_of": "2005-05-17",
+      "capital_eur": 150000.0,
+      "shares_total": 1500,
+      "nominal_eur": 100.0,
+      "holders": [
+        {
+          "name": "unattributed — not stated in this filing",
+          "kind": "UNKNOWN",
+          "shares": 1500
+        }
+      ],
+      "caused_by": [
+        "evt-inc-2005-05-17"
+      ]
+    },
+    {
+      "as_of": "2005-08-16",
+      "capital_eur": 150000.0,
+      "shares_total": 1500,
+      "nominal_eur": 100.0,
+      "holders": [
+        {
+          "name": "Antonio BLANCO MARINA",
+          "kind": "PERSON",
+          "shares": 823
+        },
+        {
+          "name": "Xavier AUMONT",
+          "kind": "PERSON",
+          "shares": 617
+        },
+        {
+          "name": "Franck GICQUEL",
+          "kind": "PERSON",
+          "shares": 60
+        }
+      ],
+      "caused_by": [
+        "evt-end-guellati-2005",
+        "evt-end-leroux-2005",
+        "evt-end-roujean-2005"
+      ]
+    },
+    {
+      "as_of": "2006-10-20",
+      "capital_eur": 200000.0,
+      "shares_total": 2000,
+      "nominal_eur": 100.0,
+      "holders": [
+        {
+          "name": "unattributed — not stated in this filing",
+          "kind": "UNKNOWN",
+          "shares": 2000
+        }
+      ],
+      "caused_by": [
+        "evt-inc-2006-10-20"
+      ]
+    },
+    {
+      "as_of": "2008-06-27",
+      "capital_eur": 200000.0,
+      "shares_total": 200000,
+      "nominal_eur": 1.0,
+      "holders": [
+        {
+          "name": "HADEAN",
+          "kind": "COMPANY",
+          "siren": "499979540",
+          "shares": 200000
+        }
+      ],
+      "caused_by": []
+    },
+    {
+      "as_of": "2008-06-27",
+      "capital_eur": 217241.0,
+      "shares_total": 217241,
+      "nominal_eur": 1.0,
+      "holders": [
+        {
+          "name": "HADEAN",
+          "kind": "COMPANY",
+          "siren": "499979540",
+          "shares": 217241
+        }
+      ],
+      "caused_by": [
+        "evt-inc-2008-06-27-a"
+      ]
+    },
+    {
+      "as_of": "2008-06-27",
+      "capital_eur": 368102.0,
+      "shares_total": 368102,
+      "nominal_eur": 1.0,
+      "holders": [
+        {
+          "name": "HADEAN",
+          "kind": "COMPANY",
+          "siren": "499979540",
+          "shares": 217241
+        },
+        {
+          "name": "unattributed — not stated in this filing",
+          "kind": "UNKNOWN",
+          "shares": 150861
+        }
+      ],
+      "caused_by": [
+        "evt-inc-2008-06-27-b"
+      ]
+    },
+    {
+      "as_of": "2017-02-21",
+      "capital_eur": 217241.0,
+      "shares_total": 217241,
+      "nominal_eur": 1.0,
+      "holders": [
+        {
+          "name": "HADEAN",
+          "kind": "COMPANY",
+          "siren": "499979540",
+          "shares": 217241
+        }
+      ],
+      "caused_by": [
+        "evt-dec-2017-02-21",
+        "evt-end-fpci-securite-2017",
+        "evt-end-fip-galia-pme4-2017",
+        "evt-end-galia-venture-2017",
+        "evt-end-fpci-brienne-2017"
+      ]
+    },
+    {
+      "as_of": "2018-03-23",
+      "capital_eur": 400000.0,
+      "shares_total": 400000,
+      "nominal_eur": 1.0,
+      "holders": [
+        {
+          "name": "HADEAN",
+          "kind": "COMPANY",
+          "siren": "499979540",
+          "shares": 400000
+        }
+      ],
+      "caused_by": [
+        "evt-inc-2018-03-23"
+      ]
+    }
+  ],
+  "notes": "Capital chain cross-checked against tests/golden_capital_chain.json (an earlier session's hand-verified reading, independently re-tested by tests/test_golden_chain.py against the real OCR/PDF) and re-verified live against the real OCR by this script (scripts/build_results.py). Known, documented gaps, not resolved here (CLAUDE.md rule 6 — contradictions are reported, never silently resolved):\n1. Who subscribed the 1 130 shares of the 2005-05-17 increase is not stated anywhere in this corpus; the deciding AGE (2005-03-04) is not in the corpus.\n2. Malik GUELLATI, Christophe LEROUX and Marielle ROUJEAN held shares between (at latest) 2005-05-17 and 2005-08-16 (`…ec4` p.1 lists GUELLATI and LEROUX as associés that day; `…ec2` p.6 ratifies the cession of the totality of their shares, effective 2005-08-16), but how many shares each held, and how each acquired them, is not stated anywhere in this corpus.\n3. Two documents disagree on Antonio BLANCO MARINA's share count after the 2005-08-16 reallocation: the reallocation document itself (`…ec2` p.6) states 823; the feuille de présence of the next AGE (`…ec7` p.6, 2006-10-20) states 803. Both tables sum to 1 500 with the other two holders unchanged. Neither can be shown wrong; both are reported here. This results.json uses 823 (the reallocation document's own figure).\n4. The exact realisation date of the 2006-10-20 increase is uncertain — beneficiaries had until 2006-11-16 to subscribe and no constatation act is in this corpus. event_date uses the AGE date.\n5. Who held the 150 861 category-B shares created 2008-06-27 is not stated in this corpus until the 2017 buyback names 4 funds as holding exactly that total — attributing that 2017 split back to 2008 would be an inference, not a fact, so it is not made; the 2008-06-27 (post class-B) timeline row carries those 150 861 shares as an explicit UNKNOWN holder.\n6. How HADEAN SAS (SIREN 499979540) came to hold 100% of ARCHEAN between 2007 and 2008-06-27 is not documented anywhere in ARCHEAN's own folder — the 2008-06-27 nominal-split resolution's own preamble already names HADEAN as sole associée on that date; data/499979540/ documents the mechanism, which qualifies the brief's statement that this timeline is reconstructable from 480489707's folder alone.\n7. The 2005-08-16 reallocation among BLANCO/AUMONT/GICQUEL is stated in `…ec2` p.6 as a RESULT table, not as discrete seller-buyer transfer instructions, so it is not modelled as a SHAREHOLDER_SHARE_TRANSFER event (the schema payload wants one seller, one buyer, one share count — inventing a pairwise split from an aggregate table would be exactly the kind of invention CLAUDE.md rule 1 forbids). The three departures ARE modelled, as SHAREHOLDER_END events, because the departure itself is directly stated even though the individual amount is not.\n8. share_transfer routing (archean/route.py) is structurally capped at MENTION/SILENT for capital_amount's sibling mechanism (DISCOVERY.md 8.5/8.7/8.8/8.10) — no SHAREHOLDER_SHARE_TRANSFER events were sourced through the router; every SHAREHOLDER_* event above was sourced by direct reading, cross-checked live at build time (see scripts/build_results.py's module docstring).\n9. The 2008-06-27 nominal-value split (100 EUR -> 1 EUR nominal, capital unchanged) has no home in the six schema event codes and is represented only as a capital_timeline row with no caused_by — inventing a seventh event code would misrepresent the schema, not the fact."
+}
