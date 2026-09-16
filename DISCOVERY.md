@@ -1182,6 +1182,211 @@ unaffected (page 3 alone makes it `OPERATIVE`), and narrowing the regex to exclu
 limitation and pinned as a regression test (`test_known_limitation_transition_rule_also_matches_an_approved_principle`)
 rather than silently fixed.
 
+### 8.8 Independent non-ARCHEAN gold set — `tests/data/gold_non_archean.json`
+
+Every rule in `route.py` was measured and tuned entirely on ARCHEAN. Cross-corpus checking
+(§8.5) only ever had the noisy `typeRdd` label to compare against elsewhere. This section
+asks the harder question directly: does `route.py`, unmodified, agree with a second set of
+labels determined by reading a different company's documents, with nobody having looked at
+that company while the router was built?
+
+#### 1. Company selection — structural criteria, computed before reading anything
+
+`[F]` **HADEAN (499979540) was excluded from candidacy**, not merely deprioritised: it was
+already inspected in detail (documents `9133`, `9134`, `9139`) to validate `route.py`'s
+date-based recital check during cross-corpus validation. Using it again would let a company
+that shaped a rule also grade it.
+
+`[F]` A structural score was computed over the remaining 18 companies, before any document
+body was read, from `≥2 typeRdd-capital-tagged documents`, `≥1 OCR'd document with no
+typeRdd`, an explicit `Constitution` typeRdd tag, and `≥70%` OCR coverage:
+
+| score | siren | denomination | docs | ocr | typeRdd-capital | no-typeRdd, ocr'd | has Constitution tag |
+|---|---|---|--:|--:|--:|--:|---|
+| 4 | 445070311 | JACQUES BOCKEL SARL | 12 | 9 | 3 | 2 | yes |
+| 3 | 412000887 | *SARL CEROV FORMATION | 8 | 6 | 0 | 2 | yes |
+| 3 | 401009741 | SARL CREAMANDE | 12 | 9 | 2 | 6 | no |
+| 3 | 016850919 | (unnamed) | 12 | 9 | 1 | 1 | yes |
+| 2 | 360500011 / 328024377 / 035550318 / 027080076 | — | 12 each | 9–11 | 0–1 | 1–7 | no |
+| 0 | 015551401 | — | 6 | 4 | 1 | 0 | no |
+
+`[F]` **JACQUES BOCKEL SARL** (445070311) scored highest and was selected. `[F]` It is a
+**SARL** (parts sociales), not a SAS like ARCHEAN — directly exercising the SAS/SARL
+vocabulary split already found in §8.5 (`parts sociales` fires in 0 ARCHEAN documents).
+`[F]` Three of its `typeRdd` entries are bare named-party pairs (`"BOCKEL JACQUES / BOCKEL
+JEREMY ET DOMENEGHETTY MATHIEU"`, `"JACQUES BOCKEL / SCHOTT VERONIQUE"`, `"JACQUES BOCKEL /
+DOMENEGHETTY MATHIEU"`) — a form the weak `typeRdd`-label rule in `analyze_routing.py` does
+not recognise as `share_transfer` at all (it looks for the words "cession"/"donation"),
+making content-based detection here genuinely independent of that label, not merely
+uncorrelated with it.
+
+`[R]` **Limitation, stated before any document was read and confirmed after:** this company
+was not selected, and does not offer, a clean "authorised but not yet exercised" case
+matching ARCHEAN's `…7ebf`/`…7ec8` pair. That question (§4.3) remains untested by this gold
+set — recorded as insufficient evidence, not forced.
+
+#### 2. Gold schema — one deliberate departure from the task's own sketch
+
+`[R]` The task proposed a 4-mechanism schema (`capital_amount`, `share_transfer`,
+`constitution`, `authorization`). **This was not adopted.** `route.py` has exactly two
+mechanisms (`KNOWN_MECHANISMS`); a gold item labelled `constitution` or `authorization`
+would have nothing in `route.py`'s own output space to compare against, guaranteeing an
+unfalsifiable "disagreement" that reflects a schema mismatch, not a finding. `[R]` The gold
+schema instead uses `route.py`'s own two mechanisms exactly, with `document_kind` as a free
+descriptive field capturing "this is really a constitution" or "this is really a valuation
+report" for qualitative discussion — comparable, not merely descriptive, and every
+constitution/report document is scored the same way `route.py` would necessarily bucket it
+(as `capital_amount`, landing in `MENTION`).
+
+`tests/data/gold_non_archean.json`'s `Evidence` shape: `document_id`, `mechanism`, `verdict`
+(the same four `Verdict` values as `route.py`), `page`, `line_index` (matching
+`archean.ground.OcrLine.index`'s raw, unfiltered convention exactly), `evidence_text`,
+`rationale`, `metadata_label` (the weak `typeRdd`-derived label, recorded but never the
+source of a verdict), plus `known_finding_id` linking an item to a structured
+`known_findings` entry when its disagreement with `route.py` was predicted in advance, in
+prose, before the comparison was run.
+
+#### 3. Gold inventory
+
+`[F]` 14 items across 7 documents (9 OCR'd documents exist for this company; 2 more were
+scanned structurally but not independently derived — see §5):
+
+| mechanism | OPERATIVE | RECITAL | MENTION | SILENT |
+|---|--:|--:|--:|--:|
+| `capital_amount` | 3 | 0 | 4 | 0 |
+| `share_transfer` | 2 | 0 | 2 | 3 |
+
+`[F]` **No `capital_amount` `SILENT` item exists in this gold set** — every one of the 9
+OCR'd documents read contains at least one line matching `CAPITAL_TOPIC`, because either a
+feuille de présence's routine quorum sentence (`"X parts sur Y parts composant le capital
+social"`) or a report's contextual mention triggers it. `[R]` This is reported as a genuine
+gap in the gold set's coverage, not concealed by omitting the row above or forcing a weak
+example. `[F]` **No `capital_amount`/`share_transfer` `RECITAL` gold item exists either** —
+see §5's finding that this company's one capital-recital construction
+(`"Lors de l'augmentation de capital en date du <date>, [subject] apporte..."`) never
+actually co-occurs with an amount on the same line, so it was never a candidate for gold
+`RECITAL` in the first place — a third, previously undocumented recital surface form, whose
+absence from `TRANSITION_RE` happens to be *protective* rather than *dangerous* (§5).
+
+#### 4. Independent evidence, by the task's four priority questions
+
+**A. `share_transfer` `OPERATIVE`.** `[F]` **Found — for the first time in this project.**
+Document `5420` (and its twin `5426`, see §6) contains three genuine, unambiguous transfers
+of *existing* shares between named parties, each stated as `"Le cédant cède et transporte...
+au cessionnaire qui accepte"` with an explicit share count and a stated price: Jacques
+BOCKEL → Mathieu DOMENEGHETTY, 76 parts (3.8%), **5 700 euros**, act signed 2007-08-07;
+Jacques BOCKEL → Véronique SCHOTT, 106 parts (5.30%), effective 2010-12-30; Jacques BOCKEL →
+Jérémy BOCKEL and DOMENEGHETTY jointly. `[I]` This answers §4.1's central question with a
+positive instance: `OPERATIVE`-shaped share-transfer text does exist and is locatable by a
+human reader; `route.py` has no rule that can reach it (§8.5/§8.7's documented ceiling), so
+this item is an intentional, structural disagreement (`mechanism_coverage_gap`), not a bug.
+
+**B. `constitution`.** `[F]` Document `541e` is a genuine constitution (capital 7 500 euros,
+100 parts of 75 euros, allocated 10/90 between the two founders, signed and dated). `[I]` It
+reads the same way ARCHEAN's `…7ec5` does under the current schema: states an initial capital
+with no transition verb, so `MENTION`, not a distinct verdict — confirming (not merely
+assuming) that a real constitution and a mere statutes-reprint of one both land in the same
+bucket under the current two-mechanism design.
+
+**C. `authorization`.** `[U]` **Not found.** No document read here presents a standalone
+authorised-but-unrealised ceiling. §4.3's question — can a document distinguish an
+authorisation that was later exercised from one that was not — remains untested by this gold
+set. Recorded as insufficient evidence, exactly as the task anticipates is an acceptable
+outcome.
+
+**D. Recital exclusion — a third surface form found, and it turns out not to matter here.**
+`[F]` This company's statutes recite the 2003 apport-en-nature operation as `"Lors de
+l'augmentation de capital en date du 05 août 2003, [Jacques BOCKEL] apporte à la
+Société..."` — a third construction, distinct from both ARCHEAN's `"aux termes de"` and
+HADEAN's `"Lors de [operation] décidée par [assembly] du <date> :"`. `[F]` **Measured
+directly**: this exact line matches neither `_TRANSITION_RE` nor `_AMOUNT_RE` — the recital
+opener has no transition verb on the same line as an amount, so it was never a candidate for
+`route.py`'s recital-exclusion logic to act on in the first place. `[R]` This is real
+evidence, but it answers a narrower question than intended: it shows the regex's *narrowness*
+incidentally protects against this form, not that the *recital-exclusion logic itself*
+generalises to it. §5's finding is the one that actually exercises recital-exclusion in this
+company, and it exercises a completely different, more serious failure mode.
+
+**E. Date-vs-backref.** See §5 — not a trade-off measurement here, a single unified bug.
+
+#### 5. The dominant finding: a systematic, previously undiscovered bug
+
+`[F]` **Every disagreement in this comparison traces to one root cause, confirmed three
+times, independently, before being written up as one finding rather than three.**
+`archean.frenchnum.parse_french_date_parts` accepts any bare 4-digit numeral in the
+1000–2999 range as a year, with no other validation. Share and part counts in this
+corpus routinely fall in exactly that range:
+
+| document | the numeral | misread as | consequence |
+|---|---|---|---|
+| `541d`, p.3 idx 2 | `"1766"` (*"création de 1766 parts"*) | year 1766 < 2003 | a genuinely `OPERATIVE` résolution (the apport-en-nature increase) is suppressed into `RECITAL`. Document-level verdict still `OPERATIVE` — résolution 3's independent line survives. |
+| `5421`, p.5 idx 50 | `"1766"` again, one line above a boilerplate Article 8/9 line that *also* falsely matches `TRANSITION_RE` (`"augmentation de capital de"` matches inside `"...capital de la SàRL"` — no amount-after-"de" requirement) | year 1766 < 2003 | the suppressed candidate alone flips the WHOLE document from gold `MENTION` to router `RECITAL`, because `classify()`'s control flow is `if operative: OPERATIVE; elif suppressed: RECITAL; else: check topic → MENTION` — a suppressed candidate short-circuits the topic check entirely. |
+| `5420`/`5426`, the 2013 increase | `"2000"` (*"création de 2000 parts nouvelles"*) | year 2000 < 2013 | the **sole** operative line in each file is suppressed, with no second line to fall back on — the document-level verdict flips from gold `OPERATIVE` to router `RECITAL`. This is the most consequential instance: two genuinely decided, adopted, and realised capital increases (150 000 → 300 000 euros, exact `"pour le porter de"` template) are misclassified. |
+
+`[R]` **Not fixed here**, per this step's explicit scope. Reproduction: `archean.corpus.
+load_corpus(...)`, `archean.route._capital_evidence(doc, _read_document_lines(doc))` shows
+each cited line in `suppressed`, not `operative`; `archean.frenchnum.parse_french_date_parts
+("...1766...").year == 1766` and the same for `"2000"` confirm the parser's own behaviour
+directly, independent of `route.py`.
+
+#### 6. A confirmed structural finding, independent of the router
+
+`[F]` `5420` and `5426` share `numChrono` 2049 and are one registry deposit split into two
+PDF files with overlapping content (an AGE, updated statutes, and three cession acts, all
+present in both at different page offsets) — discovered only because both files' raw
+candidate-line counts came out numerically identical during construction (33 topic-capital
+lines, 65 topic-transfer lines, 1 suppressed line, in both) and were checked directly rather
+than assumed coincidental. `[R]` This is the same twin-filing pattern already documented for
+ARCHEAN (§4.1's C8: `…ec8`/`…ec9`, `…eca`/`…ecb`) — now confirmed in a second company, from
+independent evidence, not merely re-asserted.
+
+#### 7. Router comparison — `scripts/gold_compare.py`, run 2026-09-17
+
+`[F]` **8 of 14 items agree (57%); 6 disagree, and every disagreement is fully categorised —
+zero fall into the `other` bucket:**
+
+| item | mechanism | gold | router | category |
+|---|---|---|---|---|
+| `bockel-5421-capital` | capital_amount | MENTION | RECITAL | `date_problem` |
+| `bockel-5420-capital` | capital_amount | OPERATIVE | RECITAL | `date_problem` |
+| `bockel-5426-capital` | capital_amount | OPERATIVE | RECITAL | `date_problem` |
+| `bockel-5421-transfer` | share_transfer | SILENT | MENTION | `mechanism_coverage_gap` |
+| `bockel-5420-transfer` | share_transfer | OPERATIVE | MENTION | `mechanism_coverage_gap` |
+| `bockel-5426-transfer` | share_transfer | OPERATIVE | MENTION | `mechanism_coverage_gap` |
+
+`[F]` The `mechanism_coverage_gap` disagreements are **exactly** what §8.5/§8.7 already
+predicted (`share_transfer` cannot reach `OPERATIVE`, by construction) — confirmed, not
+newly discovered. `[F]` The `date_problem` disagreements are new: §5's bug was not known
+before this step. `[R]` `bockel-5421-transfer`'s disagreement was predicted in the gold
+item's own rationale *before* the comparison was run (`"cession"` matching in its
+asset-resale sense, not its share-transfer sense) — confirmed exactly as predicted, which is
+itself a small, useful validation that the gold set's reasoning was sound going in, not
+rationalised after the fact.
+
+`[R]` **We do not conclude "the router is 57% accurate."** Per the task's explicit
+instruction and this project's standing practice: agreement is a fact about two independent
+readings of the same documents, not a grade. Every disagreement here has a specific,
+traceable cause that a reviewer can check independently — that is the useful output, not the
+percentage.
+
+#### 8. What this confirms, what it weakens, what remains unresolved
+
+`[F]` **Confirmed**: `share_transfer`'s `OPERATIVE` ceiling is real and load-bearing — a
+genuine, unambiguous, priced transfer exists in real data and the router cannot reach it.
+The `mechanism_coverage_gap` category is not theoretical. `[F]` **Confirmed**: the twin-filing
+(`numChrono`) pattern generalises beyond ARCHEAN. `[I]` **Weakened**: the working assumption
+that `route.py`'s capital-recital logic, validated as `TP=5/FP=0` on ARCHEAN and shown to
+generalise to HADEAN's second surface form (§8.7), was reasonably robust. It is not — a
+completely different, more basic failure mode (numeral-as-year misparsing) was sitting
+underneath, invisible in ARCHEAN and HADEAN only because neither happened to place a
+4-digit share count within three lines of a transition+amount line. `[U]` **Unresolved**:
+whether `authorization` and `constitution` need their own mechanism at all, now that a real
+constitution has been observed to behave identically to a statutes-reprint under `MENTION`;
+whether the third recital surface form found here (§4.D) would matter in a company where it
+*does* co-occur with an amount; how many companies in the corpus have a share/part count in
+the 1000–2999 range near a capital resolution (not measured — this step found the bug in one
+company, it did not survey its prevalence).
+
 ---
 
 ## 9. LLM Strategy — the division of labour

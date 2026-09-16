@@ -157,6 +157,47 @@ Rules never invented beyond what §8.3–§8.6 measured:
 - No `if doc.doc_id == "...":` anywhere — verified by an AST-based test, not a text scan
   (the module's own docstring quotes that exact forbidden pattern as an example).
 
+**A known, unfixed bug, found via `tests/data/gold_non_archean.json` (DISCOVERY.md §8.8),
+not yet corrected — read the full finding before touching `frenchnum.py`'s year parsing or
+`route.py`'s recital window:**
+`archean.frenchnum.parse_french_year` accepts any bare 4-digit numeral in 1000–2999 as a
+year, no further validation. Share/part counts routinely fall in that range. Confirmed three
+times on JACQUES BOCKEL SARL (445070311): `"1766"` (a share count) and `"2000"` (another
+share count) both get read as years, both earlier than the surrounding document's own year,
+both wrongly trigger `_cites_earlier_year` and suppress a genuinely `OPERATIVE` line into
+`RECITAL`. Two real capital increases (150 000 → 300 000 euros, decided, adopted, realised)
+are misclassified as a result — `classify()`'s control flow (`operative → OPERATIVE; elif
+suppressed → RECITAL; else check topic`) means even ONE falsely-suppressed candidate flips
+the whole document, with no fallback to the topic-only `MENTION` check. Never surfaced in
+ARCHEAN or HADEAN because neither happened to place a 4-digit share count within 3 lines of
+a transition+amount line. Not fixed — this step's scope was evidence, not repair.
+
+## Second gold set — `tests/data/gold_non_archean.json`
+
+The only other hand-verified gold set besides ARCHEAN's. Company: JACQUES BOCKEL SARL
+(445070311), selected by structural score (typeRdd-capital density, typeRdd absence/presence
+diversity, an explicit Constitution tag) computed before any document was read. HADEAN was
+explicitly excluded from candidacy — it was already used to validate `route.py`'s recital
+logic, so it is not independent. `scripts/gold_compare.py` runs the blind comparison; see
+DISCOVERY.md §8.8 for the full result (8/14 agree; the 6 disagreements are 3 instances of the
+bug above and 3 confirmations of `share_transfer`'s known `OPERATIVE` ceiling — zero
+uncategorised). Do not add new items to this file to make agreement look better; do not
+re-derive existing items' verdicts from `route.py`'s own output.
+
+Findings that generalised, and one that didn't:
+- **A genuine `share_transfer` `OPERATIVE` case exists** (JACQUES BOCKEL → Mathieu
+  DOMENEGHETTY, 76 parts, 5 700 euros, priced and dated) — the first one found in this
+  project. Confirms the `mechanism_coverage_gap` is a real limitation, not a theoretical one.
+- **The twin-filing (`numChrono`) pattern generalises** — `5420`/`5426` are one registry
+  deposit split into two files, same shape as ARCHEAN's `…ec8`/`…ec9`.
+- **A third recital surface form exists** (`"Lors de l'augmentation de capital en date du
+  <date>, [X] apporte..."`) but never co-occurs with `TRANSITION_RE`+`AMOUNT_RE` on one line
+  in this company's documents, so it never tests the recital-exclusion logic at all — the
+  regex's narrowness happens to protect against it, which is different from the logic having
+  been shown to generalise to it.
+- No `authorization`-only (unexercised ceiling) case was found in this company — untested,
+  not ruled out.
+
 ## Routing evidence — not routing itself
 
 `scripts/analyze_routing.py` measures candidate phrases against
