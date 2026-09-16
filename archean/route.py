@@ -151,10 +151,28 @@ CAPITAL_TOPIC: tuple[str, ...] = (
 _AMOUNT_RE = re.compile(r"\d[\d .,]*(euros?|eur\b|€)")
 
 #: A capital-change construction, as opposed to a bare topic mention.
+#:
+#: "augmentation de capital de" / "reduction du capital de" are ambiguous in a
+#: way the other alternatives are not: "de" there can introduce a quantity
+#: ("augmentation de capital de 113 000 euros", 5 corpus-wide instances, an
+#: operative amount) or a noun phrase ("augmentation de capital de la SàRL
+#: JACQUES BOCKEL", 2 corpus-wide instances, a mere topic reference — "on
+#: account of the [company]'s capital increase", never followed by a number).
+#: DISCOVERY.md §9 measured both corpus-wide: every "de <digit>" instance is a
+#: real operative statement; every "de <non-digit>" instance is this same
+#: boilerplate valuation-report sentence (JACQUES BOCKEL 541d ×2, 5421 ×1),
+#: never an amount. These two alternatives therefore require a digit
+#: immediately after "de", folded into the alternative itself rather than
+#: relying on `_AMOUNT_RE` matching anywhere on the line. The other
+#: alternatives keep matching a bare phrase, unchanged: verified corpus-wide
+#: (DISCOVERY.md §9) that every one of their 54 transition+amount hits already
+#: has a digit within a few words, by ordinary French verb+quantity grammar
+#: ("augmenté de 113 000 euros" = "increased BY 113 000 euros"), so no
+#: comparable ambiguity was found for them.
 _TRANSITION_RE = re.compile(
     r"\b(augmente(?:e|es|s)? de|reduit(?:e|s)? de|porter le capital"
     r"|pour le porter|ramene(?:e)? de|augmenter le capital|reduire le capital"
-    r"|augmentation de capital de|reduction du capital de)\b"
+    r"|augmentation de capital de(?=\s+\d)|reduction du capital de(?=\s+\d))\b"
 )
 
 #: The historical back-reference that opens a statutes recital of a past

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from archean.corpus import load_corpus
-from archean.ground import OcrLine
+from archean.ground import OcrLine, normalize_text
 from archean.route import (
     CAPITAL_TOPIC,
     KNOWN_MECHANISMS,
@@ -23,6 +23,7 @@ from archean.route import (
     Classification,
     Evidence,
     Verdict,
+    _TRANSITION_RE,
     _cites_earlier_year,
     _phrase_pattern,
     classify,
@@ -38,6 +39,15 @@ def archean(actes_root):
 @pytest.fixture(scope="module")
 def hadean(challenge_root):
     root = challenge_root / "data" / "499979540" / "actes"
+    if not root.is_dir():
+        pytest.skip(f"{root} not present in this checkout")
+    return load_corpus(root)
+
+
+@pytest.fixture(scope="module")
+def bockel(challenge_root):
+    """JACQUES BOCKEL SARL — the second gold set's company, DISCOVERY.md §8.8."""
+    root = challenge_root / "data" / "445070311" / "actes"
     if not root.is_dir():
         pytest.skip(f"{root} not present in this checkout")
     return load_corpus(root)
@@ -517,6 +527,98 @@ def test_known_limitation_transition_rule_also_matches_an_approved_principle(arc
     assert p5_evidence, "expected the known page-5 edge case to still be present"
     assert "principe" in p5_evidence[0].text.lower()
     assert "100.000 euros" in p5_evidence[0].text
+
+
+# ===========================================================================
+# TRANSITION_RE — the "de <amount>" vs "de <noun phrase>" ambiguity
+# (DISCOVERY.md §9; JACQUES BOCKEL SARL, 445070311, document 5421)
+# ===========================================================================
+
+
+def test_5421_boilerplate_valuation_line_is_not_a_transition(bockel):
+    """Reproduces the false positive exactly as it occurred.
+
+    Document 5421 is a "rapport du commissaire aux apports" — an
+    independent auditor's report VALUING a proposed in-kind contribution,
+    ahead of the shareholders' meeting that will actually decide the
+    increase. Its full sentence (page 5, lines 189-192): "En contrepartie
+    de la valeur nette de cet apport ..., il SERA attribué à Monsieur
+    Jacques BOCKEL 1766 parts nouvelles entièrement libérées de nominal 75
+    euros au titre de l'augmentation de capital de la SàRL JACQUES BOCKEL."
+    — future tense ("sera", will be), describing what the report proposes,
+    not what has been decided. Gold verdict: MENTION.
+
+    Before this fix, `_TRANSITION_RE` matched the bare phrase
+    "augmentation de capital de" here (a topic reference — "on account of
+    the SARL's capital increase" — the "de" introduces the COMPANY, not an
+    amount) and `_AMOUNT_RE` matched "75 euros" anywhere on the same line
+    (the nominal value per share, not the increase amount) — together
+    satisfying `_capital_evidence`'s transition+amount test and producing a
+    false OPERATIVE verdict. Root cause: the regex never checked what
+    "augmentation de capital de" was actually followed by.
+    """
+    d = doc(bockel, "5421")
+    result = classify(d, "capital_amount")
+    assert result.verdict == Verdict.MENTION, (
+        f"expected MENTION (matching gold); got {result.verdict} — the "
+        f"TRANSITION_RE boilerplate false match has regressed"
+    )
+    assert all(ev.signal != "operative-capital" for ev in result.evidence), (
+        "the boilerplate valuation line must not count as operative-capital "
+        "evidence any more"
+    )
+
+
+def test_augmentation_de_capital_de_requires_a_following_amount():
+    """The general fix, isolated from any one document. Real corpus text
+    for both branches (DISCOVERY.md §9's corpus-wide measurement: 5 of 7
+    corpus-wide "augmentation de capital de" hits are followed by a digit
+    and are genuine operative amounts; the other 2 are this exact
+    boilerplate sentence, in 5421 and 541d, followed by "la" — a
+    determiner introducing the company's name, never a number).
+    """
+    operative = "réalisation définitive de l'augmentation de capital de 113 000 € par la création"
+    assert _TRANSITION_RE.search(normalize_text(operative))
+
+    topic_reference = (
+        "nouvelles entièrement libérées de nominal 75 euros au titre de "
+        "l'augmentation de capital de la SàRL JACQUES BOCKEL."
+    )
+    assert not _TRANSITION_RE.search(normalize_text(topic_reference))
+
+
+def test_other_transition_alternatives_are_unaffected_by_the_amount_requirement():
+    """Only the two ambiguous "de <company>" / "de <amount>" alternatives
+    gained a lookahead. The others (verb + "de" + quantity, an unambiguous
+    French construction — DISCOVERY.md §9 measured 100% digit-adjacency
+    corpus-wide) still match a bare phrase, no amount required at the match
+    site itself.
+    """
+    assert _TRANSITION_RE.search(normalize_text("le capital social est augmenté de 113.000 euros"))
+    assert _TRANSITION_RE.search(normalize_text("décide d'augmenter le capital social d'une somme de 10.050,00 euros"))
+    assert _TRANSITION_RE.search(normalize_text("pour le porter de 21 294 euros à 21 600 euros"))
+    assert _TRANSITION_RE.search(normalize_text("le capital, réduit de 150 861 euros pour"))
+    assert _TRANSITION_RE.search(normalize_text("ramené de 368 102 euros à 217 241 euros"))
+
+
+def test_541d_evidence_no_longer_carries_the_same_boilerplate_line_twice(bockel):
+    """541d's document-level verdict was already OPERATIVE via two genuine,
+    independent operative lines (page 3) — this fix does not change that
+    verdict, only cleans up its evidence: the SAME boilerplate valuation
+    sentence used to appear twice more (pages 13 and 30) as spurious
+    'operative-capital' evidence.
+    """
+    d = doc(bockel, "541d")
+    result = classify(d, "capital_amount")
+    assert result.verdict == Verdict.OPERATIVE
+    boilerplate_hits = [
+        ev for ev in result.evidence
+        if "au titre de l" in ev.text.lower() and "augmentation de capital de la" in ev.text.lower()
+    ]
+    assert boilerplate_hits == [], (
+        f"expected the boilerplate valuation sentence to no longer count as "
+        f"operative evidence, found {len(boilerplate_hits)} instance(s)"
+    )
 
 
 # ===========================================================================

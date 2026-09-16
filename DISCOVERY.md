@@ -1576,9 +1576,172 @@ fix worked" would be exactly the kind of thing this step was designed to prevent
   resolution) across the other 18 non-ARCHEAN, non-BOCKEL companies was not surveyed** — this
   step fixed the mechanism generally, but did not re-run the full gold-comparison exercise
   against every company, only the one with a hand-verified gold set.
-- **`bockel-5421-capital` remains a genuine disagreement** for the separate, already-documented
-  `TRANSITION_RE` boilerplate-match reason above — not something this step's scope covers
-  fixing (that would mean narrowing `TRANSITION_RE`, an unrelated signal-tuning change).
+- `[U]` **Superseded by §8.10.** `bockel-5421-capital`'s disagreement, described above as
+  "not something this step's scope covers fixing", **was** fixed in the very next step —
+  §8.10 found the `TRANSITION_RE` boilerplate match had a robust, corpus-proven textual
+  distinction after all (whether "de" is followed by a digit or a determiner), which this
+  paragraph did not yet know when it was written.
+
+---
+
+### 8.10 Final routing hardening — the `TRANSITION_RE` boilerplate false match
+
+`[F]` **The problem, exposed by §8.9, not caused by it.** After §8.9 fixed the year-misparse
+bug, `bockel-5421-capital` stayed a disagreement — but for a different reason than before:
+gold says `MENTION`, the router said `OPERATIVE`. `_capital_evidence` (`archean/route.py`)
+matched `_TRANSITION_RE` against `"...au titre de l'augmentation de capital de la"` (page 5,
+line index 50) and `_AMOUNT_RE` against `"75 euros"` elsewhere on the same line, together
+satisfying the transition+amount test. Full sentence, reconstructed across three OCR lines
+(page 5, indices 48-50): *"En contrepartie de la valeur nette de cet apport ..., il **sera**
+attribué à Monsieur Jacques BOCKEL 1766 parts nouvelles entièrement libérées de nominal 75
+euros au titre de l'augmentation de capital de la SàRL JACQUES BOCKEL."* — future tense
+(*"sera"*, will be), from a *"rapport du commissaire aux apports"*, an independent auditor's
+report VALUING a proposed contribution ahead of the shareholders' meeting that will actually
+decide the increase. It decides nothing; gold's own rationale for this item says so directly.
+
+`[F]` **Root cause.** `_TRANSITION_RE`'s `"augmentation de capital de"` alternative never
+checked what followed "de". `_AMOUNT_RE` then matched independently, anywhere on the line —
+here, the 75-euro **nominal value per new share**, not an increase amount. Two separate,
+compounding imprecisions, not one: the transition phrase is a bare topic reference in French
+("*augmentation de capital de la SARL X*" = "the SARL X's capital increase", a noun phrase
+naming whose operation it is, not a quantity), and the amount check had page/line reach far
+enough to find an unrelated number.
+
+`[F]` **What `TRANSITION_RE` actually represents (§9's Phase-2 question).** Not "an executed
+operation" as a whole — it is a mix of two different things wearing one name: seven of its
+nine alternatives are verb + "de" + quantity constructions (*"augmenté **de** 113 000
+euros"* = "increased **BY** 113 000 euros"), where "de" grammatically **must** introduce a
+quantity and cannot introduce anything else — these are unambiguous by construction. Two
+alternatives — `"augmentation de capital de"` and `"reduction du capital de"` — are
+genitive/topic constructions where "de" can introduce **either** a quantity (*"de 113 000
+euros"*) **or** an entity (*"de la SARL X"*), and only corpus measurement can tell which one
+occurs in a given instance.
+
+`[F]` **Corpus-wide measurement, all 20 companies, every `TRANSITION_RE`+`AMOUNT_RE`
+co-occurrence** (`scripts/validate_routing.py`-style line reading, 67 426 OCR lines):
+
+| alternative | corpus-wide transition+amount hits | followed directly by a digit |
+|---|--:|---|
+| `augmente(e/es/s)? de` | 31 | 31/31 |
+| `augmenter le capital` | 10 | 0/10 (amount is a few words later: *"...le capital social d'une somme de X euros"*) |
+| `pour le porter` | 8 | 0/8 (*"...de X euros à Y euros"*) |
+| **`augmentation de capital de`** | **7** | **5/7** — see below |
+| `reduire le capital` | 2 | 0/2 |
+| `porter le capital` | 1 | 0/1 |
+| `reduit(e/s)? de` | 1 | 1/1 |
+| `ramene(e)? de` | 1 | 1/1 |
+| `reduction du capital de` | 0 | — (never fires in this corpus) |
+
+`[F]` The other eight alternatives were checked too, not assumed safe: `"digit immediately
+after"` is not their shape (several put the amount several words later, inside a longer
+clause), but **every one of their 54 hits has an amount unambiguously belonging to that same
+clause** — none is a case where an unrelated number elsewhere on the line could be mistaken
+for the transition's own amount, because none of those seven verbs/constructions has a second
+reading where "de X" names an entity instead of a quantity. Only the two
+`"...capital de"` genitive alternatives have that second reading, so only they needed the
+narrower check.
+
+`[F]` Of the 7 `"augmentation de capital de"` hits, checked individually:
+
+| document | text after "de" | classification |
+|---|---|---|
+| `024052656`/`…d37b` | `"49.686,51 euros est définitivement et"` | operative amount |
+| `480489707`/`…7ec4` | `"113 000 € par la création de 1 130"` | operative amount |
+| `480489707`/`…7ec7` p.5 | `"100.000 euros (plus une"` | operative amount (an *"approve le principe"* clause — §8.7's already-documented, separate known limitation; unaffected by this fix) |
+| `499979540`/`…9136` | `"59 900 euros, assortie d'une prime d'apport de"` | operative amount |
+| `445070311`/`5421` p.5 | `"la"` | **topic reference — the false positive** |
+| `445070311`/`541d` p.13 | `"la"` | **topic reference — same sentence, duplicated** |
+| `445070311`/`541d` p.30 | `"la"` | **topic reference — same sentence, duplicated again** |
+
+`[F]` **Not an isolated case: a systematic pair.** Both false positives are the exact same
+boilerplate sentence (the auditor's report's standard valuation-attribution wording),
+occurring three times across two documents — once in `5421`, twice in `541d` (the same
+report appears to be reproduced twice within `541d`, at different page offsets, consistent
+with the twin-filing/reprint pattern already documented elsewhere in this corpus). Zero
+counter-examples: every "de + digit" instance is genuinely operative; every "de + non-digit"
+instance is this same boilerplate reference. A sample of 7, not exhaustive of the whole
+corpus's potential vocabulary, but exhaustive of every instance this specific pattern
+produces in the actual shipped data — Phase 2's "systematic class vs isolated case" question
+is answered: systematic (not one-off), but narrow (one recurring sentence, not a broad class
+of constructions).
+
+`[F]` **Fix chosen — priority 2 (Phase 3): a proven textual distinction, so `TRANSITION_RE`
+was corrected, not the routing context.** The two ambiguous alternatives now require a digit
+immediately after "de" (`(?=\s+\d)`, a zero-width lookahead — chosen over a consuming `\d`
+after finding by direct testing that a consuming digit breaks the trailing `\b` for
+multi-digit numbers, since digit-digit has no word boundary between them). The other seven
+alternatives are untouched — corpus measurement found no comparable ambiguity to justify
+touching them, and doing so anyway would be an unmeasured, speculative change. No document ID,
+no company name, no exception list, no fuzzy or semantic matching — the fix lives entirely
+in what character class follows a specific French preposition.
+
+`[F]` **541d's evidence, not just 5421's verdict, improved.** `541d`'s document-level verdict
+was already `OPERATIVE` before this fix (two independent genuine operative lines on page 3
+carry it), so this fix does not change that verdict — but it removes the same boilerplate
+sentence from its evidence tuple twice (previously reported redundantly as `operative-capital`
+evidence on pages 13 and 30), which matters for the module's own auditability promise even
+where it does not flip a verdict.
+
+`[F]` **Gold-set impact — `scripts/gold_compare.py`, re-run after this fix:**
+
+| item | mechanism | gold | before (§8.9 state) | after (§8.10) | result |
+|---|---|---|---|---|---|
+| `bockel-541e-capital` | capital_amount | MENTION | mention | mention | unchanged |
+| `bockel-541e-transfer` | share_transfer | MENTION | mention | mention | unchanged |
+| `bockel-5421-capital` | capital_amount | MENTION | **operative** | **mention** | **fixed** |
+| `bockel-5421-transfer` | share_transfer | SILENT | mention | mention | unchanged (`mechanism_coverage_gap`) |
+| `bockel-541d-capital` | capital_amount | OPERATIVE | operative | operative | unchanged verdict; evidence tuple shrank from 4 to 2 lines |
+| `bockel-541d-transfer` | share_transfer | MENTION | mention | mention | unchanged |
+| `bockel-5420-capital` | capital_amount | OPERATIVE | operative | operative | unchanged |
+| `bockel-5420-transfer` | share_transfer | OPERATIVE | mention | mention | unchanged (`mechanism_coverage_gap`) |
+| `bockel-5426-capital` | capital_amount | OPERATIVE | operative | operative | unchanged |
+| `bockel-5426-transfer` | share_transfer | OPERATIVE | mention | mention | unchanged (`mechanism_coverage_gap`) |
+| `bockel-541b-capital` | capital_amount | MENTION | mention | mention | unchanged |
+| `bockel-541b-transfer` | share_transfer | SILENT | silent | silent | unchanged |
+| `bockel-541c-capital` | capital_amount | MENTION | mention | mention | unchanged |
+| `bockel-541c-transfer` | share_transfer | SILENT | silent | silent | unchanged |
+
+`[F]` **11 of 14 agree (79%, up from 10/14 after §8.9, 8/14 before §8.9). `capital_amount` is
+now 7/7 — every capital_amount item in this gold set agrees with the router.** The 3
+remaining disagreements are all `share_transfer`'s already-documented, structural
+`mechanism_coverage_gap` (§8.5/§8.7/§8.8: no `OPERATIVE`-reaching signal for `share_transfer`
+survived cross-corpus measurement — untouched by this or the previous fix). `[R]` This was
+not optimised for: the fix was designed and corpus-measured before this table was produced,
+against a proven textual distinction, not against the agreement count.
+
+`[F]` **ARCHEAN regression — unaffected.** `scripts/validate_routing.py rules` (ARCHEAN's own
+gold, `transition + amount, no earlier date nearby`): **TP=5, FP=0, FN=2, TN=10**, byte-for-byte
+identical to §8.7/§8.9's figures. None of ARCHEAN's own `"augmentation de capital de"` /
+`"reduction du capital de"` hits (`…7ec4`, `…7ec7` page 3 and page 5) are followed by anything
+but a digit — the page-5 "approved principle" known limitation (§8.7,
+`test_known_limitation_transition_rule_also_matches_an_approved_principle`) is unchanged,
+still present, still not this fix's target (it is followed by a real digit, `"100.000
+euros"` — a different, already-documented limitation, not the one fixed here).
+`tests/test_route.py`'s full ARCHEAN and HADEAN suites pass unchanged.
+
+`[F]` **A parallel, unfixed instance, recorded rather than silently left inconsistent.**
+`scripts/validate_routing.py`'s own `TRANSITION` constant (line ~109) is a separate,
+independently-maintained copy of the same alternation, predating `route.py` and kept
+unmodified by this step — the same reasoning as §8.9's note about that script's separate
+`frenchnum`-consuming date rule. It still has the unfixed ambiguity. Checked whether this
+matters for anything currently measured: `tests/test_routing_validation.py`'s full suite
+passes unchanged (it does not happen to exercise the `5421`/`541d` boilerplate sentence
+through a path that changes any frozen count), so nothing in this document required updating
+on that account — but the script itself remains a second copy of a pattern this step proved
+wrong in one instance, out of scope to fix here the same way `scripts/validate_routing.py`'s
+`frenchnum`-dependent behaviour was in §8.9.
+
+`[R]` **Not claimed as solved beyond its proven scope:**
+- Only the two `"...capital de"` genitive alternatives were touched. The other seven were
+  measured, not assumed — but only against this corpus's actual 54 non-ambiguous hits, not
+  against every French sentence shape that could theoretically occur.
+- `scripts/validate_routing.py`'s own `TRANSITION` constant carries the identical,
+  now-proven-wrong pattern and was deliberately not touched (out of scope — see above).
+- Whether other, still-unmeasured boilerplate sentences exist elsewhere in the 18
+  non-ARCHEAN, non-BOCKEL companies that would trigger a similar false match was not
+  surveyed — this step fixed the one proven, reproducible instance and the general
+  grammatical class it belongs to, not an exhaustive corpus-wide scan for every possible
+  boilerplate sentence shape.
 
 ---
 

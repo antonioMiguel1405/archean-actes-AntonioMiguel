@@ -358,27 +358,29 @@ def test_no_disagreement_is_uncategorized_as_other(gold, gold_docs_by_id):
 
 
 def test_agreement_and_disagreement_counts_match_measured_state(gold, gold_docs_by_id):
-    """The exact counts measured and written into DISCOVERY.md 8.9 after the
-    four-digit numeral/year fix: 10 agreements, 4 disagreements (1
-    date_problem, 3 mechanism_coverage_gap — share_transfer's known ceiling,
-    unaffected by this fix).
+    """The exact counts measured and written into DISCOVERY.md §9 after the
+    TRANSITION_RE fix: 11 agreements, 3 disagreements, all
+    mechanism_coverage_gap (share_transfer's known OPERATIVE ceiling —
+    untouched by this step). capital_amount is now 7/7.
 
-    Before the fix (DISCOVERY.md 8.8, superseded): 8 agreements, 6
-    disagreements (3 date_problem, 3 mechanism_coverage_gap). Fixing the
-    bare-year-as-any-4-digit-numeral bug (8.9) correctly flips 5420's and
-    5426's capital_amount items from disagree to agree — both are real,
-    realised capital increases and are now classified OPERATIVE, matching
-    gold. 5421's capital_amount item stays a disagreement, but its own
-    known_findings text already named the second, independent cause: a
-    boilerplate line matches TRANSITION_RE+AMOUNT_RE on its own ("...au
-    titre de l'augmentation de capital de la" + a nearby amount) and used to
-    be accidentally suppressed into RECITAL by the very year-misparse bug
-    fixed here. Removing that bug does not remove the boilerplate
-    false-match; it only stops hiding it, so the document now surfaces as
-    OPERATIVE instead of RECITAL — still a disagreement against gold's
-    MENTION, still correctly categorised date_problem because it is the
-    same known_finding_id ("date-misparse-share-counts-as-years"), just a
-    different downstream verdict of the same root cause.
+    History of this number across the two bug fixes this gold set drove:
+      - before DISCOVERY.md §8.9 (year-misparse fix):    8/14 (3 date_problem, 3 mechanism_coverage_gap)
+      - after §8.9, before §9 (TRANSITION_RE fix):       10/14 (1 date_problem, 3 mechanism_coverage_gap)
+      - after §9 (this step):                            11/14 (0 date_problem, 3 mechanism_coverage_gap)
+
+    §9's fix: 5421's capital_amount item was the one remaining date_problem
+    disagreement — but its own known_findings text already named the real,
+    independent cause: TRANSITION_RE's "augmentation de capital de"
+    alternative matched a boilerplate valuation-report sentence ("...au
+    titre de l'augmentation de capital de la SàRL...", "de" introducing the
+    COMPANY, not an amount) that the year-misparse bug used to hide inside
+    a RECITAL verdict. §8.9 removed that hiding; §9 removed the false match
+    itself, once corpus-wide measurement (DISCOVERY.md §9) showed a
+    reliable textual distinction: every one of the other 5 corpus-wide
+    "augmentation de capital de" hits is immediately followed by a digit
+    (a real amount); both false-positive instances (5421, and the same
+    sentence duplicated in 541d) are followed by a determiner ("la"), never
+    a number.
     """
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     import gold_compare
@@ -387,27 +389,28 @@ def test_agreement_and_disagreement_counts_match_measured_state(gold, gold_docs_
     rows = gold_compare.compare(gold, gold_docs_by_id)
     agree = sum(1 for r in rows if r.get("agree"))
     disagree = sum(1 for r in rows if r.get("agree") is False)
-    assert agree == 10
-    assert disagree == 4
+    assert agree == 11
+    assert disagree == 3
 
     cats = Counter(r.get("category") for r in rows if r.get("agree") is False)
-    assert cats == Counter({"date_problem": 1, "mechanism_coverage_gap": 3})
+    assert cats == Counter({"mechanism_coverage_gap": 3})
 
 
-def test_the_remaining_date_problem_disagreement_is_5421_capital(gold, gold_docs_by_id):
-    """Only one of the original three date_problem items is still a
-    disagreement. 5420 and 5426's capital_amount items are fixed (see
-    test_5420_and_5426_are_now_correctly_operative below) — they no longer
-    appear here. 5421's capital_amount item remains, for the independent,
-    pre-documented boilerplate-match reason recorded in this gold item's own
-    known_findings entry, not because the year-misparse bug is unfixed.
+def test_capital_amount_mechanism_is_now_fully_agreed(gold, gold_docs_by_id):
+    """DISCOVERY.md §9: fixing the TRANSITION_RE boilerplate false match
+    resolved the last remaining capital_amount disagreement (5421). Every
+    capital_amount item in this gold set now agrees; the 3 remaining
+    disagreements are all share_transfer's known mechanism_coverage_gap.
     """
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     import gold_compare
 
     rows = gold_compare.compare(gold, gold_docs_by_id)
-    date_problem_ids = {r["item_id"] for r in rows if r.get("category") == "date_problem"}
-    assert date_problem_ids == {"bockel-5421-capital"}
+    capital_rows = [r for r in rows if r["mechanism"] == "capital_amount"]
+    assert len(capital_rows) == 7
+    assert all(r["agree"] for r in capital_rows), [
+        r["item_id"] for r in capital_rows if not r["agree"]
+    ]
 
 
 def test_the_fix_lives_in_frenchnums_context_layer_not_a_route_py_special_case():

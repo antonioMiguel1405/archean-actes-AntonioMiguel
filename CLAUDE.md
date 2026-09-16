@@ -146,6 +146,11 @@ Rules never invented beyond what §8.3–§8.6 measured:
   via both discovered surface forms — `aux termes de` and a cited year earlier than the
   document's own, checked in a **line-local window, not page-wide** — widening it to
   page-wide was tested and made it *worse*, TP dropping from 5 to 3 on ARCHEAN gold).
+  `_TRANSITION_RE`'s two genitive alternatives (`"augmentation de capital de"`,
+  `"reduction du capital de"`) require a digit immediately after "de" — DISCOVERY.md §8.10:
+  measured corpus-wide, "de" there can introduce either an amount or a company name, and only
+  the digit-adjacency distinguishes them. The other seven alternatives don't have this
+  ambiguity (measured, not assumed) and stay unrestricted.
 - `share_transfer` can **only** reach `MENTION` or `SILENT` — no signal for it survived
   cross-corpus measurement (§8.5), so `OPERATIVE` is structurally unreachable for it, not
   merely untriggered. Don't add `protocole de cession` / `nouvel actionnaire` / `ordre(s) de
@@ -179,6 +184,25 @@ OCR-split across two lines — that exclusion always rested on the same over-per
 fallback, never on a principled reading of the split date. Cross-line OCR date splitting is a
 separate, still-open, unfixed defect (see DISCOVERY.md §8.9's remaining limitations).
 
+**A second found-and-fixed bug**, exposed by fixing the first one (DISCOVERY.md §8.10 — read
+before touching `_TRANSITION_RE`): document `5421`'s router verdict flipped from the first
+bug's `RECITAL` to a *different* wrong verdict, `OPERATIVE` — gold says `MENTION`.
+`_TRANSITION_RE`'s `"augmentation de capital de"` alternative matched a boilerplate valuation-
+report sentence (`"...au titre de l'augmentation de capital de la SàRL..."` — future tense,
+*"il sera attribué"*, a proposal, not a decision), because "de" there introduces the
+**company**, not an amount, and `_AMOUNT_RE` separately matched an unrelated number elsewhere
+on the same line (a per-share nominal value, not the increase amount). Measured corpus-wide
+(all 20 companies, 61 transition+amount hits): every one of this alternative's other 5 hits
+is immediately followed by a digit (a real amount); both false positives (`5421` once, `541d`
+twice — the same sentence reprinted) are followed by a determiner, never a number. **Fix**:
+the two genitive alternatives (`"augmentation de capital de"`, `"reduction du capital de"`)
+now require a digit immediately after "de"; the other seven alternatives, already unambiguous
+by French verb grammar (measured: 100% of their 54 hits have an amount belonging to that same
+clause), are untouched. ARCHEAN unaffected (TP=5/FP=0/FN=2/TN=10, unchanged).
+`scripts/validate_routing.py`'s own, separately-maintained `TRANSITION` constant still carries
+this exact bug and was deliberately not touched (same out-of-scope reasoning as §8.9's
+`frenchnum`-in-`validate_routing.py` note).
+
 ## Second gold set — `tests/data/gold_non_archean.json`
 
 The only other hand-verified gold set besides ARCHEAN's. Company: JACQUES BOCKEL SARL
@@ -186,11 +210,12 @@ The only other hand-verified gold set besides ARCHEAN's. Company: JACQUES BOCKEL
 diversity, an explicit Constitution tag) computed before any document was read. HADEAN was
 explicitly excluded from candidacy — it was already used to validate `route.py`'s recital
 logic, so it is not independent. `scripts/gold_compare.py` runs the blind comparison; see
-DISCOVERY.md §8.9 for the current result (10/14 agree, up from 8/14 before the fix above; the
-4 remaining disagreements are 1 residual instance of the bug above — same root cause, a
-different downstream verdict, see §8.9 — and 3 confirmations of `share_transfer`'s known
-`OPERATIVE` ceiling — zero uncategorised). Do not add new items to this file to make agreement
-look better; do not re-derive existing items' verdicts from `route.py`'s own output.
+DISCOVERY.md §8.10 for the current result (**11/14 agree** — `capital_amount` is 7/7, fully
+agreed; the 3 remaining disagreements are all `share_transfer`'s known, structural
+`OPERATIVE` ceiling, `mechanism_coverage_gap` — zero uncategorised). Progression across both
+fixes: 8/14 → 10/14 (§8.9, the year-misparse fix) → 11/14 (§8.10, the `TRANSITION_RE` fix). Do
+not add new items to this file to make agreement look better; do not re-derive existing
+items' verdicts from `route.py`'s own output.
 
 Findings that generalised, and one that didn't:
 - **A genuine `share_transfer` `OPERATIVE` case exists** (JACQUES BOCKEL → Mathieu
