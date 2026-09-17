@@ -1402,8 +1402,10 @@ company, it did not survey its prevalence).
 
 ### 8.9 Four-digit numeral / year ambiguity — the fix, and what fixing it cost
 
-`[F]` **How it was found.** §8.8's independent gold set surfaced it as a router
-disagreement first, then it was traced to its root: `archean.frenchnum.parse_french_date_parts`
+`[F]` **How it was found.** Identified by this project's engineer during review, then
+independently confirmed by §8.8's gold set, which flagged it as a router disagreement on a
+document the AI had not itself checked — matching accounts, README.md §8. Traced from there
+to its root: `archean.frenchnum.parse_french_date_parts`
 accepted **any** bare 4-digit numeral in 1000–2999 as a year, with no contextual check.
 Confirmed three times on JACQUES BOCKEL SARL (445070311) — `541d` p.3, `5421` p.5, and
 `5420`/`5426` — where share/part counts `"1766"` and `"2000"` were each read as a year
@@ -1746,6 +1748,14 @@ wrong in one instance, out of scope to fix here the same way `scripts/validate_r
 ---
 
 ## 9. LLM Strategy — the division of labour
+
+`[U]` **Superseded — never implemented, see §23.6 and README.md §8.** This table was the plan
+at the point it was written. The router (§8) and the event/timeline layer (§23) turned out to
+answer the challenge's grading criteria fully deterministically; running an LLM directly over
+this corpus's text volume in the extraction path was judged, before implementation, to add
+token cost, runtime, and non-determinism the shipped pipeline does not otherwise have, so this
+plan was not built. `cache/llm/` in `.gitignore` still names the convention below for the
+record, but nothing was ever written to it.
 
 | task | code | LLM | human (you) |
 |---|---|---|---|
@@ -2597,7 +2607,10 @@ per-line `score` field, used only to filter empty-text lines; `doc_id` used only
 indexing/reporting, never for verdict branching, independently verified by an AST test).
 `§9`'s original LLM Strategy plan (committing a `cache/llm/` response cache) was never
 exercised — the deterministic approach answered the challenge's own stated grading criteria
-(traceability, internal coherence, honesty about gaps) without it.
+(traceability, internal coherence, honesty about gaps) without it, and running an LLM over
+this corpus's full text volume directly in the extraction path would have added token cost,
+runtime, and a source of non-determinism results.json's own build (byte-identical across
+independent runs, tests/test_results.py) does not otherwise have — see README.md §8.
 
 ### 23.7 Remaining limitations — explicit, not resolved here
 

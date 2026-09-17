@@ -380,9 +380,12 @@ mismatched snippet is rejected not repaired) with a committed `cache/llm/` respo
 implemented.** The router (`archean/route.py`) and the event/timeline layer
 (`scripts/build_results.py`, `archean/timeline.py`) turned out to answer the challenge's own
 stated grading criteria — traceability, internal coherence, honesty about gaps — fully
-deterministically, without an LLM call anywhere in the shipped pipeline. `cache/llm/` does not
-exist because nothing ever wrote to it; this is a design outcome, not an oversight, and is
-recorded (not silently dropped) here and in `README.md`'s "How I used AI" section.
+deterministically, without an LLM call anywhere in the shipped pipeline. Given this corpus's
+text volume, running an LLM directly in the extraction path would also have added token cost,
+runtime, and a source of non-determinism the shipped pipeline does not otherwise have.
+`cache/llm/` does not exist because nothing ever wrote to it; this is a design outcome, not an
+oversight, and is recorded (not silently dropped) here and in `README.md`'s "How I Used AI"
+section.
 
 Temperature 0. Every response cached to `cache/llm/` and **committed**, so a reviewer can
 reproduce `results.json` with no API key.

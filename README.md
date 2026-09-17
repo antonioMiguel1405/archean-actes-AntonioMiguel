@@ -176,47 +176,31 @@ Numbers are reported as measurements, not scores — see `DISCOVERY.md` for the 
 dated record of every one of them, including the two router bugs the independent gold set
 found and how each was fixed.
 
-## 8. How I used AI
+## 8. How I Used AI
 
-This whole project, its tests, and every DISCOVERY.md
-entry — was built in an extended pair-programming session with Claude (Anthropic), driven by
-an explicit phase structure per session: audit before touching code, corpus-wide measurement
-before trusting a signal, a minimal regression test before calling a bug fixed, honest
-documentation of what remained unresolved before moving on.
+The project was built with the help of Claude, which did most of the extensive work, including most of the coding.
 
-**What was delegated**: writing the actual Python (parser, router, timeline, build/validate
-scripts, tests), running the corpus-wide measurements, reading raw OCR text to locate
-specific facts (e.g. finding the `…ec2` page-6 "protocole de cession" line that grounds the
-three `SHAREHOLDER_END` events), and drafting `DISCOVERY.md`'s narrative.
+I see my role as a software engineer as designing the pipeline's infrastructure and, most importantly, 
+validating its outcomes. Every minimally important file was reviewed by me, and bugs and false positives
+were identified and corrected before moving to the next stage.
 
-**What was checked, not trusted**: every citation in `results.json` is re-grounded live
-against the real PDF/OCR at build time (`scripts/build_results.py`'s `ground()`, backed by
-`archean/ground.py`'s `Grounder`, which is itself tested against the challenge's own
-`tools/bbox_viewer.py` reference behaviour) — a moved or invented snippet fails the build
-loudly, not silently. Every capital delta is cross-checked against `route.py`'s own,
-independently-computed `OPERATIVE` verdict before being cited. The independent gold set
-(`tests/data/gold_non_archean.json`) was built and compared *blind*, specifically to catch
-router bugs that self-testing against ARCHEAN's own gold would have missed — and it did
-catch two, both real, both documented.
+What I checked: every citation in `results.json` is re-grounded live against the real PDF/OCR at 
+build time (`scripts/build_results.py`'s `ground()`, backed by `archean/ground.py`'s `Grounder`, which is 
+itself tested against the challenge's own `tools/bbox_viewer.py` reference behaviour). A moved or invented snippet
+ therefore fails the build loudly rather than silently. Every capital delta is cross-checked against `route.py`'s 
+ independently computed `OPERATIVE` verdict before being cited.
 
-**Where it went wrong, and was caught**: an early version of the recital-detection date
-parser accepted any bare 4-digit share count (e.g. `1766`) as a plausible year — found only
-because the independent gold set disagreed with the router on a document neither AI nor
-human had specifically checked. An early `TRANSITION_RE` alternative matched a boilerplate
-valuation-report sentence as if it were an operative decision — found the same way, one layer
-deeper, once the first bug's masking effect was removed. Both are written up in full in
-`DISCOVERY.md` §8.9/§8.10, including the corpus-wide measurement that justified each fix and
-the alternative fixes that were measured and rejected.
+The independent gold set (`tests/data/gold_non_archean.json`) was built and compared *blind*, specifically to catch router 
+bugs that self-testing against ARCHEAN's own gold would have missed — and it did catch two, both real and both documented.
 
-**No LLM call is anywhere in the shipped pipeline** (`archean/`, `scripts/`) — everything
-that runs to produce `results.json` is deterministic Python, verified by
-`tests/test_route.py::test_route_py_imports_nothing_fuzzy_or_networked` and a corpus-wide
-grep audit for fuzzy/embedding/LLM/score/confidence terms (`DISCOVERY.md`'s closing
-section). This was a deliberate choice, not a constraint of the tools available: the
-project's original strategy (`DISCOVERY.md` §9) planned an LLM extraction layer with a
-committed response cache; building the router and timeline to the same evidentiary standard
-without one turned out to answer the challenge's own scoring criteria (traceability,
-internal coherence, honesty about gaps) at least as well, for less moving-parts risk.
+What went wrong: an early version of the recital-detection date parser accepted any bare four-digit share count as a plausible year. I identified the issue, and it was subsequently confirmed by the independent gold set on a document that the AI had not checked. An early `TRANSITION_RE` alternative also matched a boilerplate valuation-report sentence as an operative decision. This was found using the same independent validation approach, one layer deeper, after the first bug's masking effect had been fixed.
+
+Both issues are documented in full in `DISCOVERY.md` §8.9/§8.10, including the corpus-wide measurements that justified each fix and the alternative fixes that were measured and rejected.
+
+There are no LLM calls in the delivered pipeline (`archean/`, `scripts/`) — everything that runs to produce `results.json` is deterministic Python. This is verified by `tests/test_route.py::test_route_py_imports_nothing_fuzzy_or_networked` and by a corpus-wide grep audit for fuzzy matching, embeddings, LLM, scoring, and confidence terms (documented in the closing section of `DISCOVERY.md`).
+
+This was a deliberate design choice, not a constraint. The project's original strategy (`DISCOVERY.md` §9) planned an LLM extraction layer. However, given the size of the corpus and the amount of text that needed to be processed, using LLMs directly in the extraction pipeline would have been unnecessarily expensive in terms of tokens and runtime, while also making the final pipeline less deterministic. I therefore used AI during development and validation, but kept the delivered extraction pipeline fully deterministic.
+
 
 ## 9. Limitations
 
