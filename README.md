@@ -7,6 +7,8 @@ its 17 filed *actes* (2005–2025), for the Takeovers Engineering Challenge — 
 each grounded in a real document/page/bbox) and `capital_timeline[]` (the cap-table state
 after each one — the artefact the challenge is actually about).
 
+**Screen recording (~3 min walkthrough):** https://youtu.be/Gxq2BCALPMQ
+
 ## 1. Problem
 
 French companies deposit the minutes of every capital or shareholder change with the
@@ -176,7 +178,7 @@ found and how each was fixed.
 
 ## 8. How I used AI
 
-This whole project — corpus/parser/router/timeline code, its tests, and every DISCOVERY.md
+This whole project, its tests, and every DISCOVERY.md
 entry — was built in an extended pair-programming session with Claude (Anthropic), driven by
 an explicit phase structure per session: audit before touching code, corpus-wide measurement
 before trusting a signal, a minimal regression test before calling a bug fixed, honest

@@ -356,8 +356,9 @@ Only requirements actually stated by the challenge, plus the checks we chose:
   by the schema's `additionalProperties: true` on `payload`, not yet exercised because it has
   not been needed.
 - [x] `README.md` covering: how to run it, trade-offs, **"How I used AI"**, what could not be
-  resolved, what would be done next. The ~3-minute screen recording is explicitly NOT part of
-  what an AI closing session produces — see the final prompt's own scope boundary.
+  resolved, what would be done next, and the ~3-minute screen recording link
+  (https://youtu.be/Gxq2BCALPMQ, recorded and linked by the user — producing it was explicitly
+  outside an AI closing session's own scope, see the final prompt's scope boundary).
 - [x] `.env.example` naming the one environment variable the code reads
   (`ARCHEAN_CHALLENGE_ROOT`, a local path, not a secret) — no API keys, no tokens, no model
   names anywhere in `archean/` or `scripts/` (verified by grep + direct reading, `DISCOVERY.md`
