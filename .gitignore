@@ -1,0 +1,34 @@
+# --- secrets: never commit ---
+.env
+.env.*
+!.env.example
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# --- transient output ---
+*.log
+out/
+scratch/
+
+# ---------------------------------------------------------------------------
+# DELIBERATELY NOT IGNORED — these are how the submission is audited:
+#
+#   results.json            the deliverable itself
+#   tests/                  including golden_capital_chain.json (the oracle)
+#   DISCOVERY.md            the reasoning trail
+#   CLAUDE.md               the working rules
+#   archean/                all pipeline source
+#   scripts/                investigation tools used to reach the conclusions
+#   docs/box_checks/*.png   rendered bbox proofs (small, and they are evidence)
+#
+#   cache/llm/              NOT ignored on purpose. Committing the cached LLM
+#                           responses is what lets a reviewer reproduce
+#                           results.json with no API key. See CLAUDE.md.
+# ---------------------------------------------------------------------------

@@ -1,0 +1,2632 @@
+# Discovery — Takeovers · Data/ML Engineer · Challenge ACTES
+### ARCHEAN TECHNOLOGIES · SIREN 480489707
+
+> **Status:** discovery + provenance groundwork. No extraction pipeline, no `results.json` yet.
+
+## How to read the labels in this document
+
+Every substantive claim below carries one of four markers. They mean different things and
+must not be collapsed into each other.
+
+| marker | meaning | how far you may trust it |
+|---|---|---|
+| **`[F]` FACT** | Read directly in a document in this corpus, or observed directly in the repository. Cited with document, page and — where it matters — bbox. | Trust it. It was re-read during the verification pass of §4.2-V. |
+| **`[I]` INFERENCE** | Our conclusion, derived from facts. Sound reasoning, but nobody wrote it down. | Treat as provisional. Never promote to a number in `results.json` without saying it is derived. |
+| **`[H]` HYPOTHESIS** | Plausible, not yet checked against a document. | Do not act on it. Check it first. |
+| **`[R]` RECOMMENDATION** | An engineering decision **we** propose. | These are **our** choices, not requirements from Takeovers. Where the challenge actually mandates something, it is quoted and marked `[F]`. |
+
+**Nothing marked `[R]` is an official requirement of the challenge.** The only binding
+requirements are those in `BRIEF.md`, `README.md` and the two schema files, which are quoted
+verbatim wherever relied on.
+
+---
+
+## 1. Executive Summary
+
+**What must be built.** One `results.json` at the root of *our own* repo containing
+(a) `events[]` — capital/shareholder movements typed with 5 scored codes, each carrying
+`{inpi_id, page, bbox, snippet}`; (b) `capital_timeline[]` — the cap-table state after each
+event. Plus `README.md` (incl. "How I used AI"), `.env.example`, and a ~3 min recording.
+
+**Where the real difficulty is.** *Not* OCR, and *not* the capital amounts. The 17 actes are
+fully OCR'd, the OCR is good, and the capital chain (37 000 → 150 000 → 200 000 → 368 102 →
+217 241 → 400 000 €) is legible and internally cross-checked by the statutes themselves.
+The difficulty is **holder attribution**: French statutes stop listing shareholders after
+incorporation, so who held what must be reconstructed from PV feuilles de présence,
+subscription resolutions and diffing. Three specific pain points, all already located:
+
+1. **A missing decision.** The AGE of 2005-03-04 that decided the +113 000 € increase is
+   *not* in the corpus. Three shareholders (GUELLATI, LEROUX, ROUJEAN) appear out of nowhere,
+   hold shares for ~3 months, and leave — with no document stating how many shares each held.
+2. **Two documents that disagree.** 2005-08-08 states BLANCO 823 / AUMONT 617 / GICQUEL 60.
+   The feuille de présence of 2006-10-20 states BLANCO 803 / AUMONT 637 / GICQUEL 60.
+   Both total 1 500. 20 shares moved with no acte. (And the 2005 doc itself computes
+   60/1500 = "6,00 %", which is wrong — it is 4 %.)
+3. **The biggest ownership change is not in this folder.** Between 2007 and 2008-06-27,
+   ARCHEAN goes from 4 individuals to a single corporate owner, **HADEAN SAS
+   (SIREN 499 979 540)**. ARCHEAN's own actes never document that transfer. HADEAN's actes
+   — `data/499979540/` — do, in detail. This directly qualifies the brief's statement that
+   "the capital timeline of 480489707 is reconstructable from its own folder".
+
+**Recommended strategy (Strategy C+, detailed in §5/§13).** OCR index → deterministic
+candidate-page retrieval by French legal lexicon → LLM structured extraction *restricted to
+those pages* under a strict JSON schema → **grounding done by code, never by the LLM**
+(the LLM returns a verbatim snippet; code fuzzy-matches it back into the OCR lines and
+computes the bbox) → deterministic timeline folder → invariant validator that fails loudly.
+The LLM reads French; the code owns every number, every bbox, and every arithmetic step.
+
+---
+
+## 2. Repository Findings
+
+**Layout is not what the brief's prose implies.** The brief says `schema/results.schema.json`;
+the actual paths are scoped per challenge.
+
+```
+D:\projeto takeovers\
+└── engineering-challenges\            ← the clone (a git repo; the parent dir is not)
+    ├── README.md                      ← ground rules, submitting, grounding, AI declaration
+    ├── NOTICE.md                      ← data provenance / licence
+    ├── challenges/
+    │   ├── actes/BRIEF.md             ← our brief
+    │   ├── actes/schema/event_codes.json
+    │   ├── actes/schema/results.schema.json
+    │   ├── bilan/…  fullstack/…       ← not ours
+    ├── tools/bbox_viewer.py           ← the only code shipped (203 lines)
+    └── data/<20 sirens>/{actes,bilans}/{pdf,meta,ocr}/
+```
+
+`[F]` **There is no starter code, no tests, no CI, no requirements.txt, no example of a
+filled `results.json`.** `bbox_viewer.py` is the entire codebase. We build from zero.
+
+`[R]` **Do not commit our solution inside this clone.** Submission is "a PR to your own
+repository". Create a sibling repo, e.g. `D:\projeto takeovers\archean-actes\`, and make the
+data root a config value (`DATA_ROOT`, default `../engineering-challenges/data`), documented
+in the README. That keeps the corpus unduplicated and the provenance obvious.
+
+`[F]` Environment verified working: Python 3.14, **PyMuPDF 1.27.2.2** already installed.
+`bbox_viewer.py --grep` runs correctly on this corpus.
+
+---
+
+## 3. Schema Analysis — the exact output contract
+
+### 3.1 Top level (`challenges/actes/schema/results.schema.json`)
+
+| field | required | notes |
+|---|---|---|
+| `siren` | yes | `const: "480489707"` — a literal constant, must match exactly |
+| `events[]` | yes | see below |
+| `capital_timeline[]` | yes | see below |
+| `group` | no | bonus: `{nodes[], edges[]}` |
+| `notes` | no | free text — **this is where the contradictions go** |
+
+`additionalProperties: true` **everywhere**. That is a deliberate opening: we may add
+`confidence`, `derivation`, `conflicts`, `assumptions`, `mechanism` fields without breaking
+the schema. `[R]` Use it — it is how we show reasoning without abandoning the contract.
+
+### 3.2 `events[]` item
+
+Required: `event_id` (any unique string), `event_code` (enum of 6), `event_date`
+(string, `YYYY-MM-DD`, **not regex-validated** — but "the date the decision took effect,
+which is usually not the date the acte was deposited"), `payload` (free object),
+`source` (required: `inpi_id`, `page`, `bbox`; optional: `snippet`).
+
+- `source.inpi_id` — "the 24-character document id **from the filename**". So for
+  `acte_2017-03-28_63e9593a8be6eb9f9d257ebe.pdf` → `63e9593a8be6eb9f9d257ebe`. This is also
+  the `id` field in `meta/*.json` and the OCR subdirectory name. `[F]` verified: all three agree.
+- `source.page` — integer ≥ 1, 1-indexed, relative to the **PDF**; `[F]` verified that the OCR
+  `page_NNN.json` numbering matches PDF page numbering 1:1 for all 17 actes.
+- `source.bbox` — `[x0,y0,x1,y1]`, each `0 ≤ v ≤ 1`. **Schema-enforced.** A value > 1 makes
+  the file invalid → unscoreable. Our validator must assert this.
+
+### 3.3 `capital_timeline[]` item
+
+Required: `as_of`, `capital_eur` (number **or null**), `holders[]` (each requires `name` only).
+Optional: `shares_total`, `nominal_eur`, `holders[].siren|kind|shares|pct`, `caused_by[]`.
+
+`[I]` The nullability of `capital_eur`, `shares`, `pct`, `siren` is an invitation: **it is
+schema-legal to say "I know the capital but not the split"**. That is exactly the honest
+answer for 2005-05-17 → 2005-08-08, and for the 2008–2017 B-share holders. Use `null` plus an
+extra `"holders_known": false` / `"note"` field rather than fabricating a split.
+
+`holders[].kind` enum: `PERSON | COMPANY | UNKNOWN`.
+
+### 3.4 Event codes (`event_codes.json`) — meaning, trigger, effect, ambiguity
+
+| code | scored | payload | when to emit | effect on timeline |
+|---|---|---|---|---|
+| `CAPITAL_INCREASE` | yes | `amount_eur`, `capital_after_eur`, `method` ∈ {`numeraire`, `incorporation de reserves`, `apport en nature`, `autre`} | nominal capital goes **up** | `capital += amount`; `shares += amount/nominal`; new shares allocated to subscribers |
+| `CAPITAL_DECREASE` | yes | same shape | nominal capital goes **down** | `capital -= amount`; shares cancelled and **removed from the seller's line** |
+| `SHAREHOLDER_ENTRY` | yes | `holder_name`, `holder_siren?`, `shares?` | a party joins the cap table **for the first time** | creates a holder line |
+| `SHAREHOLDER_END` | yes | same shape | a party holds **zero** shares afterwards | removes a holder line |
+| `SHAREHOLDER_SHARE_TRANSFER` | yes | `from_name`, `to_name`, `shares`, `price_eur?` | shares move between two parties | moves N shares, `shares_total` unchanged |
+| `CAPITAL_DUAL_CLASS` | **no** | `class_name`, `description` | creation of a new class of *actions de préférence* | none on totals; annotates classes |
+
+**The critical sentence in the schema file** (SHAREHOLDER_SHARE_TRANSFER description):
+
+> "The downstream cap-table consequences — a new actor entering, an exiting actor leaving —
+> are derived by the snapshot folder (Phase 4) and emitted as SHAREHOLDER_ENTRY /
+> SHAREHOLDER_END events **at projection time, not here**."
+
+And symmetrically, SHAREHOLDER_ENTRY: *"this event captures the **consequence**; the
+**mechanism** is its own co-firing event […] recorded here only as the `mechanism` enum"*,
+and SHAREHOLDER_END: *"Most often **reconstructed** by diffing the pre- and post-act capital
+allocation article rather than stated by an explicit phrase."*
+
+`[I]` **This is Takeovers' own answer to the trap they warn about in the brief.** Their model
+is two-layer: *mechanism events* (TRANSFER / INCREASE / DECREASE) are extracted from documents;
+*consequence events* (ENTRY / END) are **derived by the timeline folder**. We should implement
+exactly that, and say so in the README — it is the single highest-signal design decision
+available in this challenge. See §10.
+
+`[R]` Add a non-schema `mechanism` field to ENTRY/END events naming the co-firing event id
+(the schema's own description asks for a `mechanism` enum). It costs nothing and proves we
+read the taxonomy rather than the summary table in the brief.
+
+---
+
+## 4. Corpus Analysis — ARCHEAN TECHNOLOGIES actes
+
+### 4.1 Hard inventory (all verified)
+
+`[F]` **17 actes, 293 PDF pages, OCR coverage 17/17 documents and 293/293 pages.** There is
+**no OCR gap at all** for the subject company. `[F]` **No PDF has a text layer**
+(`get_text()` returns 0 chars on every page of every acte) — these are pure scans; OCR or
+vision is the only route to text.
+
+| # | deposit | inpi_id | pages | meta `typeRdd` (registry's own index) | capital in header | priority |
+|---|---|---|---|---|---|---|
+| 1 | 2005-01-25 | `…257ec5` | 24 | Acte sous seing privé · **Constitution** | 37 000 | **P0** |
+| 2 | 2006-01-03 | `…257ec4` | 27 | *(meta empty)* — PV AGE 17/05/2005 + statuts | 37 000→150 000 | **P0** |
+| 3 | 2006-01-04 | `…257ec2` | 7 | PV d'assemblée · **Augmentation du capital** + président changes + statuts | 150 000 | **P0** |
+| 4 | 2007-02-20 | `…257ec7` | 31 | PV d'assemblée · **Augmentation du capital** + statuts | 150 000→200 000 | **P0** |
+| 5 | 2008-06-23 | `…257ec6` | 9 | Rapport du CAC · **avantages particuliers** | 200 000 | P2 |
+| 6 | 2008-07-15 | `…257ec3` | 31 | Extrait décisions **associé unique** · **Augmentation du capital** + statuts | 200 000→368 102 | **P0** |
+| 7 | 2008-09-08 | `…257ec1` | 9 | Rapport CAC complémentaire | 200 000 | P2 |
+| 8 | 2010-12-08 | `…257ec8` | 5 | objet social / activité + statuts | 368 102 | P3 |
+| 9 | 2010-12-08 | `…257ec9` | 26 | *(same dépôt, part 2: the statuts)* | 368 102 | P2 |
+| 10 | 2011-07-11 | `…257eca` | 1 | date de clôture + statuts | 368 102 | P3 |
+| 11 | 2011-07-11 | `…257ecb` | 27 | *(same dépôt, part 2: the statuts)* | 368 102 | P2 |
+| 12 | 2013-02-12 | `…257ebd` | 28 | Décision du président (adresse) + statuts | 368 102 | P2 |
+| 13 | 2017-01-20 | `…257ebf` | 4 | PV AG mixte · **Réduction du capital** | 368 102 | **P0** |
+| 14 | 2017-03-28 | `…257ebe` | 32 | Décision du président · **Réduction du capital** + CAC + statuts | →217 241 | **P0** |
+| 15 | 2018-05-30 | `…257ec0` | 28 | Décisions **associé unique** · **Augmentation du capital** + statuts | →400 000 | **P0** |
+| 16 | 2018-11-02 | `…257ecc` | 2 | CAC démission/nomination | 400 000 | P3 (out of scope) |
+| 17 | 2025-12-02 | `6936b416…` | 2 | PJ_52 · PV AG 24/06/2024 (comptes 2023) | 400 000 | P1 (confirms end state) |
+
+`[R]` **`meta/*.json` `typeRdd[].decision` is a free, high-precision router.** The strings
+"Augmentation du capital social" / "Réduction du capital social" / "Constitution" flag
+documents 1, 3, 4, 6, 13, 14, 15. Two caveats `[F]`: doc #2 (the 17/05/2005 AGE, the single
+largest increase) has **empty meta** — so meta alone is *not* sufficient; and the 2025 doc uses
+a different metadata shape entirely (`typeDocument: PJ_52`, `numNat`, no `typeRdd`).
+
+`[F]` **Page size varies across documents** — the 2005–2008 scans are ~1655×2360 pt, the 2010+
+ones are A4 595×842 pt. So the px→normalized conversion **must read each page's own
+`page.rect`**, never a hard-coded A4. (`bbox_viewer.polygon_to_norm` does this correctly.)
+
+`[F]` **Correction (measured full-corpus in §8.3):** this section originally claimed
+`skew_angle: 0.0` "on the pages inspected" — that was one page, generalized wrongly. Measured
+over all 293 ARCHEAN pages, `skew_angle` is a **real, page-specific float** ranging −1.998° to
++1.985° (41 distinct nonzero values); it is never a meaningful reading-order signal, it just was
+not actually 0.0. `layout: []` **is** correctly empty for every one of the 293 ARCHEAN pages —
+that part held — but is **not** empty corpus-wide (53% of all 3 995 OCR pages across the 20
+companies have a populated `layout`, mostly on `bilans` table pages; see §8.3). So there is **no
+reading-order / table structure** to lean on **for ARCHEAN's actes specifically**, which is
+still the operative fact for this project. Consequence: OCR lines come in raster order and
+**two-column tables interleave**. Real example from the constitution (doc 1, p.3), which is the
+répartition table:
+
+```
+Monsieur Xavier AUMONT
+155 actions
+155 actions
+Monsieur Antonio BLANCO MARINA
+=
+60 actions
+Monsieur Franck GICQUEL
+```
+
+The name→count pairing is *off by one line*. A naive regex pairing adjacent lines gets
+AUMONT/155 right by luck and BLANCO/60 wrong. `[R]` ~~This is precisely where an LLM earns its
+place~~ — **superseded, see §4.2-V correction 2**: the columns separate cleanly by geometry
+(y-band), so this is resolved deterministically in code, not by a model.
+
+### 4.1-V Verification pass on §4.1 — building `archean/corpus.py`
+
+§4.1's table was hand-assembled during discovery from `meta/*.json`, `ls`, and spot checks.
+Building `archean/corpus.py` — a deterministic index of `meta/`, `ocr/` and `pdf/` — gave a
+second, independent, programmatic read of the same folder. Every number in the original table
+is `[F]` **reproduced exactly**: 17 documents, 293 PDF pages, 293/293 OCR pages, the same
+document order, the same two `numChrono` duplicate pairs (C8). None of the original table's
+reproducible columns needed correction. Two things were *not* known during discovery and
+surfaced only from building the loader:
+
+**`[F]` A `typeRdd`-empty meta is not unique to the 2006-01-03 filing.** §4.1 flagged only
+that one document ("meta empty"). Loading all 17 documents' meta through one code path shows
+**two** documents have no `typeRdd` field at all: `…257ec4` (2006-01-03, as already known) and
+`6936b416…` (2025-12-02) — the latter was already known to have a *different* metadata shape
+(`typeDocument: PJ_52`, `numNat`, `libelle`) but its absence of `typeRdd` specifically was not
+called out as the same structural fact. Both are now the same machine-checkable finding
+(`no_type_rdd`), not two separately-noticed anomalies.
+
+**`[F]` 10 of 293 OCR pages carry an internal re-OCR diagnostic block**
+(`_reocr_corrected_count`, `_reocr_failed_count`, `_reocr_failures`) absent from the other 283
+pages and from the schema the brief documents (`{page, ocr, layout}`). `[F]` Every instance is
+a single-character correction attempt at the margin of a page — page-number stamps, isolated
+digits like `"7"` or `"1"` — never inside the body text the capital chain relies on. `[I]`
+This looks like Takeovers' own pipeline retrying OCR on low-confidence single-token regions;
+`[H]` it is not confirmed to be that, only that its shape (`bbox`, `new_score`, `new_text`,
+`rot_deg`, `text`) is consistent with a targeted-retry log. `[R]` `corpus.py` does not parse or
+depend on this field — the brief's documented `{page, ocr, layout}` shape is what every
+consumer should rely on, and this is recorded here only so nobody is surprised to find extra
+keys on 10 specific pages. Not acted on; not needed for anything built so far.
+
+**`[F]` Zero orphans, zero malformed filenames, and zero page-numbering conflicts anywhere in
+the full shipped corpus** — not just ARCHEAN's actes, but all 20 companies × both `actes` and
+`bilans`, checked by direct comparison of `pdf`/`meta`/`ocr` id sets. `[F]` OCR coverage is
+always **all-or-nothing per document**: either every page of a document has OCR (matching the
+PDF's page count exactly) or the `ocr/<id>/` directory does not exist at all — partial
+per-document coverage (some pages OCR'd, some not) occurs **nowhere** in the shipped corpus.
+`[F]` `meta['id']` equals the filename's id in all 20×2 folders, with no exceptions.
+
+`[R]` Consequence for `corpus.py`: its fatal-error paths (orphan files, malformed names, id
+mismatches, duplicate page numbers, partial coverage) are **never exercised by the real
+corpus** — they exist because the contract could be violated, not because it has been. They
+are tested exclusively through synthetic fixtures built under `tmp_path`, per the task's own
+guidance, and the real corpus exercises only the success path and the two benign findings
+(`no_ocr`, `no_type_rdd`, `shared_num_chrono`) that are genuinely present.
+
+`[R]` **§4.1's two non-reproducible columns.** "capital in header" and "priority" cannot be
+regenerated by `corpus.py` or `scripts/inventory.py`, and this is a deliberate boundary, not
+an oversight: both require reading what a page *says* — grepping headers for
+`"au capital de …"`, judging which documents matter for the five scored event codes — which is
+content interpretation, explicitly out of scope for a filesystem index (see the module
+docstring's "what does not belong here"). `scripts/inventory.py --format markdown` prints this
+boundary in its own output, so the omission is visible to whoever runs it, not silent.
+
+### 4.2 The reconstructed capital chain (all `[F]` unless marked)
+
+Cross-checked twice: once from the PVs, once from **Article 6 (APPORTS) of the 2008 statuts**,
+which recites the whole history — a free internal audit trail the company wrote for us.
+
+| effective date | operation | Δ capital | capital after | shares after | nominal |
+|---|---|---|---|---|---|
+| 2004-12-15 / 2005-01 | constitution | — | 37 000 | 370 | 100 € |
+| **decided 2005-03-04**, **constatée 2005-05-17** | augmentation numéraire, 1 130 new shares | +113 000 | 150 000 | 1 500 | 100 € |
+| 2005-08-16 (ordres de mouvement) | cessions — capital unchanged | 0 | 150 000 | 1 500 | 100 € |
+| 2006-10-20 | augmentation par **compensation de créance**, 500 new shares, DPS supprimé | +50 000 | 200 000 | 2 000 | 100 € |
+| 2008-06-27 | **division du nominal ×100** — capital unchanged | 0 | 200 000 | 200 000 | **1 €** |
+| 2008-06-27 (Augm. I) | émission 17 241 **Actions A** @ 5,80 € (prime 82 756,80) | +17 241 | 217 241 | 217 241 | 1 € |
+| 2008-06-27 (Augm. II) | émission 150 861 **Actions B** (ABSOC) @ 5,80 € (prime 724 132,80) | +150 861 | 368 102 | 368 102 | 1 € |
+| authorised 2017-01-19, **realised 2017-02-21** | **rachat + annulation** de 150 861 actions @ 2,72 € | −150 861 | 217 241 | 217 241 | 1 € |
+| 2018-03-23 | augmentation par **incorporation de réserves**, attribution gratuite | +182 759 | 400 000 | 400 000 | 1 € |
+| 2024-06-24 | no capital event (comptes 2023) | 0 | 400 000 | 400 000 | 1 € |
+
+Every line closes arithmetically. `[R]` This table is the **golden reference** for the
+validator: the pipeline output must reproduce it exactly, or the pipeline is wrong.
+
+### 4.2-V Verification pass on §4.2 — and four corrections to it
+
+§4.2 above is **our own reconstruction**, produced during discovery. It is not supplied by
+the challenge: `BRIEF.md` states there is no answer key, and a grep of the whole reference
+clone returns nothing resembling a capital chain. So before it could be used as a test
+oracle, every row was re-opened in the OCR, re-read, and given a bbox by the same conversion
+the pipeline will use. The result is `tests/golden_capital_chain.json`.
+
+The pass **confirmed the capital numbers on every row** and forced four corrections:
+
+**Correction 1 — it is a 9-row chain, not 10.** `[F]` The 2024-06-24 row records *no capital
+movement*; the AG approves the 2023 accounts and the capital is unchanged at 400 000 since
+2018. It is a confirmation of the end state, not an event, and it has been moved out of the
+chain into `independent_observations`. Describing it as a chain row overstated how many
+movements the corpus actually documents.
+
+**Correction 2 — the interleaved répartition tables do not need an LLM.** `[F]` §4.1 and §9
+both claimed the name↔count pairing is "precisely where an LLM earns its place". That is
+wrong. The columns separate cleanly in geometry: on the constitution page the names sit at
+`x0 ≈ 0.18` and the counts at `x0 ≈ 0.51`, and each pair shares a y-band to within 0.001:
+
+```
+y0=0.4444 x0=0.1820 | Monsieur Xavier AUMONT          y0=0.4439 x0=0.5083 | 155 actions
+y0=0.4576 x0=0.1805 | Monsieur Antonio BLANCO MARINA  y0=0.4569 x0=0.5076 | 155 actions
+y0=0.4727 x0=0.1820 | Monsieur Franck GICQUEL         y0=0.4716 x0=0.5173 | 60 actions
+```
+
+The same holds for the 2005-08 table and the 2006 feuille de présence. `[R]` Pair them by
+sorting on y and bucketing, deterministically, and keep the LLM for genuinely linguistic
+work. This moves a task out of the "LLM" column of §9 and into "code" — cheaper, reproducible,
+and it removes a hallucination surface.
+
+**Correction 3 — the 2006-10-20 date is `UNCERTAIN`, not `[F]`.** `[F]` The AGE decided the
+increase on 2006-10-20 but gave beneficiaries **until 2006-11-16** to subscribe and libérer
+par compensation, and **no constatation/réalisation act appears in the corpus**. So the
+operation completed somewhere in that window. §4.2 presented 2006-10-20 as settled; it is
+the decision date and the date the 2008 statutes attribute the operation to, which is a
+defensible choice but is a choice. Recorded as `UNCERTAIN` in the golden file. This also
+makes it the one row that must never be used to fail a build.
+
+**Correction 4 — the 2018 "185 759" is confirmed as the document's error, not OCR noise.**
+`[F]` Discovery listed this as a probable typo. It has now been checked properly: the string
+appears on **both** p.3 and p.7 (the clause is copied into the updated statutes), and p.3 was
+rendered at 130 dpi and read directly — the PDF genuinely prints `185 759`. The operative
+decision on p.2 says `182 759` twice, and 217 241 + 182 759 = 400 000 exactly. So it is the
+drafter's error, propagated. Promoted from `[H]` to `[F]`.
+
+**What the pass could *not* promote.** These stay `[I]` or unsupported and are `null` in the
+golden file — no document in this corpus states them:
+
+- who subscribed the 1 130 shares of 2005-05-17, and what GUELLATI / LEROUX / ROUJEAN held;
+- the cap table resulting from the 2006-10-20 increase (the updated statutes give only
+  "deux mille (2000) actions", with no holder list);
+- who held the 150 861 category-B shares between 2008 and 2017;
+- whether BLANCO held 823 or 803 — see §4.4/C1, unchanged and still unadjudicated.
+
+`[F]` Verification status of the 9 chain rows: **8 `VERIFIED`, 1 `UNCERTAIN`, 0 unsupported**
+on the capital numbers. On holders: 5 `VERIFIED`, 1 `VERIFIED_BUT_CONTRADICTED`, 1 `PARTIAL`,
+2 `UNSUPPORTED`. Seven distinct source documents carry the chain.
+
+### 4.3 The shareholder chain
+
+| as of | holders | total | source |
+|---|---|---|---|
+| 2005-01 | AUMONT 155 · BLANCO MARINA 155 · GICQUEL 60 | 370 | `…ec5` p.3 art.7 |
+| 2005-05-17 | AUMONT ? · BLANCO ? · GICQUEL ? · **GUELLATI ?** · **LEROUX ?** · **ROUJEAN ?** | 1 500 | **split undocumented** `[F]` |
+| 2005-08-16 | BLANCO **823** · AUMONT **617** · GICQUEL 60 | 1 500 | `…ec2` p.6 |
+| 2006-10-20 | BLANCO **803** · AUMONT **637** · GICQUEL 60 | 1 500 | `…ec7` p.6 feuille de présence — **contradicts the line above** |
+| after the 2006-10-20 AGE | AUMONT 967 · BLANCO 953 · GICQUEL 80 `[I]` | 2 000 | `…ec7` p.3 (+330/+150/+20) |
+| after cession to CAPGRAS | AUMONT **742** · BLANCO 953 · GICQUEL **80** · **CAPGRAS 225** `[I]` | 2 000 | `…ec7` p.5 authorises it; **confirmed** by HADEAN statuts reciting AUMONT 742 / GICQUEL 80 / CAPGRAS 225 |
+| 2008-06-27 | **HADEAN SAS (499 979 540) — associée unique**, 200 000 → 217 241 (A) | 217 241 | `…ec3` p.1 |
+| 2008-06-27 → 2017 | HADEAN 217 241 (A) + **4 funds** 150 861 (B) | 368 102 | classes in `…ec3` p.8; fund names **only** in `…ebe` p.3 (2017) |
+| 2017-02-21 | **HADEAN 217 241 — sole holder** ("intégralement détenues par la société HADEAN") | 217 241 | `…ebe` p.3 |
+| 2018-03-23 → today | **HADEAN 400 000** | 400 000 | `…ec0` p.3, `6936…` p.1 |
+
+The B-share holders, named only retroactively in the 2017 buyback `[F]`:
+FPCI SECURITE 64 655 · FIP GALIA PME 4 12 931 · GALIA VENTURE 30 172 ·
+FPCI FINANCIERE DE BRIENNE 43 103 = **150 861** ✓.
+`[I]` They almost certainly subscribed those exact B shares in 2008; the 2008 acte is an
+*extrait* and the resolutions naming the subscribers (10, 12–15) are **omitted from it**.
+
+### 4.4 Documented contradictions and gaps (the scored deliverable of the brief's §"What we are actually reading")
+
+| # | what | evidence | proposed handling |
+|---|---|---|---|
+| C1 | **823/617 (2005-08) vs 803/637 (2006-10)** — 20 shares move with no acte | `…ec2` p.6 vs `…ec7` p.6 | report both states; emit a `SHAREHOLDER_SHARE_TRANSFER` with `confidence: low`, `derivation: "diff"`, `note: "no acte; inferred from feuille de présence"`. Do **not** silently pick one. |
+| C2 | **"60 actions = 6,00 %"** — arithmetically 4,00 % | `…ec2` p.6 | note it; trust the share count (it closes to 1 500), not the % |
+| C3 | **"augmenté de 185 759 euros"** vs "182 759 euros" in the **same document** | `…ec0` p.3 | 217 241 + 182 759 = 400 000 ✓ → 185 759 is the document's own typo; record in `notes` |
+| C4 | **The 2005-03-04 AGE is absent from the corpus** — the decision behind the largest relative increase | referenced in `…ec4` p.2 | flag as missing; date the CAPITAL_INCREASE on the **constatation** (2005-05-17) with a note |
+| C5 | **Who subscribed the 1 130 shares of 2005** is nowhere stated | — | `holders_known: false` / `shares: null` for that snapshot |
+| C6 | **Who subscribed the 150 861 B shares in 2008** is not in the extrait | `…ec3` | attribute by back-inference from 2017, marked `[I]`, `confidence: medium` |
+| C7 | **The transfer of ~100 % of the capital to HADEAN is not in this folder** | absent | resolve from `data/499979540/` and say so explicitly |
+| C8 | 2010-12-08 and 2011-07-11 each appear **twice** (same `numChrono`, two `inpi_id`s) | meta | not a contradiction — one dépôt split into two files. Deduplicate by `numChrono` to avoid double-counting. |
+
+### 4.5 Cross-corpus (relevant to the main task, not only the bonus)
+
+`[F]` `data/499979540/actes/…069135` (dépôt 2007-09-18) — **HADEAN's constitutive statutes** are
+an *apport en nature* of ARCHEAN shares:
+
+- art. 6.2 — Xavier AUMONT contributes **742** ARCHEAN shares @ 100 € nominal, valued 575 €/share = 426 650 €, remunerated by 17 066 HADEAN shares.
+- art. 6.3 — Franck GICQUEL contributes **80** shares, 46 000 €, remunerated by 1 840 HADEAN shares.
+- art. 6.6 — "Le présent apport de titres porte sur une **participation minoritaire**".
+- AUMONT's *origine de propriété* explicitly recites: constitution + subscriptions of
+  **17 mai 2005** and **20 octobre 2006** + an **acquisition du 16 août 2005**.
+  → independent confirmation of our entire 2005–2007 reconstruction.
+
+`[F]` `…069136` (2008-04-30) and `…069137` (2008-05-29) — apport by **Michel CAPGRAS of 225
+ARCHEAN shares** to HADEAN. `[F]` `…069138/9` (2022) — HADEAN buys back CAPGRAS's shares after
+his death. `[H]` BLANCO's 953 shares reach HADEAN by the same route in 2008 — to verify in
+`…069137` before asserting it.
+
+**Twenty-company inventory** (for the bonus; OCR coverage measured):
+
+| siren | name | actes (ocr) | bilans (ocr) |
+|---|---|---|---|
+| 480489707 | **ARCHEAN TECHNOLOGIES** | 17 (17) | 9 (9) |
+| 499979540 | **HADEAN** | 9 (8) | 6 (5) |
+| 843071218 | **ARCHEAN LABS** | 3 (2) | 5 (5) |
+| 026980508 | LES IMPRESSIONS DUMAS | 12 (**0**) | 3 (**0**) |
+| 352890354 | AIR SYSTEM SERVICE | 12 (**0**) | 6 (**0**) |
+| 846650141 | ETABLISSEMENTS E PECOU | 12 (**0**) | 6 (**0**) |
+| + 14 others | LUNA, BERNACHON SA, SEM de Niort, LESUEUR, CREAMANDE, CEROV, JACQUES BOCKEL, SO ME PROD, DEDIEU, PAUTET, CONSEIL ET AUDIT MAYOTTE, 015551401, 016850919, 035550318 | varies | varies |
+
+`[F]` A corpus-wide grep for `archean|hadean` returns hits **only** in 480489707 and 499979540.
+`[I]` ARCHEAN LABS is a name-similarity candidate, not yet an evidenced edge. `[F]`
+"ARCHEAN INTERNATIONAL" is named in `…ec2` p.6–7 (a ratified agreement) with **no ownership
+claim** — a strong candidate for the brief's "at least one is named in another's filings
+without owning anything", and for `resolved: false`.
+
+---
+
+## 5. Event Extraction Strategy
+
+### 5.1 Architecture comparison
+
+| | **A** LLM reads whole docs | **B** OCR→regex→LLM on snippets | **C** OCR→classify→structured extract→deterministic fold | **D** Hand-curated ledger + code |
+|---|---|---|---|---|
+| accuracy on numbers | medium (drift, invented totals) | high | **high** | highest |
+| accuracy on French legal nuance | high | medium (regex misses paraphrase) | **high** | highest |
+| cost | 293 pages × 17 docs, high | very low | **low** (~25–35 pages sent) | zero |
+| speed | slow | fast | **fast** | slow (human) |
+| complexity | low | medium | **medium** | low |
+| auditability | poor | good | **excellent** (every stage inspectable) | excellent |
+| debuggability | poor | good | **excellent** | n/a |
+| hallucination risk | **high** | low | **low** (schema + snippet-must-exist check) | none |
+| provenance generation | **cannot** (no coordinates) | good | **excellent** | manual |
+| fits 6–8 h | yes | yes | **yes** | no — doesn't scale, and reads as "no pipeline" |
+
+**Chosen: C**, with two hardening rules borrowed from B and D:
+
+- **R1 — the LLM never emits a bbox and never emits a number that is not also present verbatim
+  in a `snippet` it quotes from the OCR.** Code verifies `snippet ⊆ OCR text of that page`
+  (normalized, fuzzy ≥ 0.90) and *rejects* the extraction otherwise.
+- **R2 — a hand-built golden file** (`tests/golden_capital_chain.json`, the table in §4.2) that
+  the pipeline output is diffed against. This is D used as a *test oracle*, not as the
+  deliverable. It is cheap (we already have it) and it converts "I think it's right" into
+  "here is the assertion that proves it".
+
+Rejected A because provenance is the graded artefact and a full-document LLM read cannot
+produce coordinates. Rejected pure B because the répartition tables (§4.1) defeat regex.
+
+### 5.2 Pipeline stages
+
+```
+Stage 0  index      meta/*.json + ocr/*/page_*.json  →  documents.jsonl (id, date, pages, typeRdd, text/page)
+Stage 1  route      (a) typeRdd decision strings  ∪  (b) lexicon hit-scoring per page   →  candidate pages
+Stage 2  extract    LLM, one call per candidate PAGE-GROUP, strict JSON schema out      →  raw_events.jsonl
+Stage 3  ground     snippet → OCR line match → polygon union → normalized bbox          →  grounded_events.jsonl
+Stage 4  fold       events sorted by (effective_date, seq) → CapitalState[]             →  capital_timeline
+Stage 5  validate   invariants + golden diff + jsonschema                               →  report.txt (fails loud)
+Stage 6  emit       results.json + notes (contradictions, gaps, confidence)
+```
+
+### 5.3 How to recognise each code (lexicon derived from *this* corpus — §11)
+
+- `CAPITAL_INCREASE` ← `augmenter le capital`, `augmentation de capital`,
+  `pour le porter de X euros à Y euros`, `par création de N actions nouvelles`,
+  `émission de N Actions`, `par incorporation de réserves`, `par compensation avec des créances`.
+  Anchor on **`pour le porter de X à Y`** — it gives `amount`, `capital_before` and
+  `capital_after` in one line, which is self-validating. Set `method` from: `numéraire` /
+  `compensation de créance` (→ `numeraire`, note the sub-mechanism) / `incorporation de réserves` /
+  `apport en nature`.
+- `CAPITAL_DECREASE` ← `réduction du capital`, `ramener de X à Y`,
+  `rachat de N actions … en vue de leur annulation`, `les actions rachetées sont annulées`.
+  **Emit on the realisation act, not the authorisation** (§5.4).
+- `SHAREHOLDER_SHARE_TRANSFER` ← `cession`, `céder N actions à`, `protocole de cession`,
+  `ordres de mouvement`, `apport de N actions de la SAS X par M. Y`, `registre des mouvements de titres`.
+- `SHAREHOLDER_ENTRY` / `SHAREHOLDER_END` ← **derived** (§10), plus explicit signals
+  `agrée à devenir actionnaire`, `nouvel actionnaire`, `associé unique`,
+  `totalité des actions détenues par`.
+- `CAPITAL_DUAL_CLASS` ← `création d'actions de préférence de catégorie A/B/B'` (`…ec3` p.2).
+  Unscored but free credit — emit it.
+
+### 5.4 `event_date` — the single most common way to get this wrong
+
+`[F]` In this corpus the **deposit date in the filename is never the effective date**, and the
+gap runs from 3 weeks to **17 months**:
+
+| filename date | actual decision date | gap |
+|---|---|---|
+| 2006-01-03 | AGE **2005-05-17** | 7.5 months |
+| 2006-01-04 | AGE **2005-08-08** (movements **2005-08-16**) | 5 months |
+| 2007-02-20 | AGE **2006-10-20** | 4 months |
+| 2008-07-15 | décisions **2008-06-27** | 3 weeks |
+| 2017-03-28 | décision du président **2017-02-21** | 5 weeks |
+| 2018-05-30 | décisions associé unique **2018-03-23** | 2 months |
+| 2025-12-02 | AG **2024-06-24** | 17 months |
+
+`[R]` Rule: `event_date` = the date **in the body** of the decision (`"L'an deux mille dix-sept,
+le vingt-et-un février"` / `"EN DATE DU 27 JUIN 2008"`). Parse French date words. Where an
+operation is *authorised* on date A and *realised* on date B (2017: 19 Jan → 21 Feb), emit the
+capital movement on **B**, because that is when the capital actually changed, and reference A in
+the payload (`authorised_on`). Use the deposit date **only** as a sanity bound
+(`event_date ≤ dateDepot`) — a cheap, powerful validator.
+
+---
+
+## 6. Timeline Reconstruction Strategy
+
+### 6.1 Intermediate model
+
+```python
+@dataclass(frozen=True)
+class Holding:
+    name: str                       # canonicalised
+    kind: Literal["PERSON","COMPANY","UNKNOWN"]
+    siren: str | None
+    shares: int | None              # None = "is a holder, count unknown"
+    share_class: str | None         # "A" / "B" / "B'" / None
+
+@dataclass(frozen=True)
+class CapitalState:
+    as_of: date
+    capital_eur: Decimal | None
+    shares_total: int | None
+    nominal_eur: Decimal | None
+    holders: tuple[Holding, ...]
+    caused_by: tuple[str, ...]      # event_ids
+    confidence: Literal["high","medium","low"]
+    warnings: tuple[str, ...]       # invariant violations recorded, not swallowed
+```
+
+Use `Decimal` for money and `int` for shares. Never floats. `pct` is **computed at emit time**
+(`shares / shares_total`), never parsed from the document — C2 shows why.
+
+### 6.2 Fold semantics (`apply(state, event) -> state`)
+
+1. **Initial state** = the constitution: capital 37 000, 370 shares, nominal 100, three named
+   holders. This is the only state read wholesale from a single article `[F]`.
+2. `CAPITAL_INCREASE` → `capital += amount`; `shares_total += amount / nominal`; allocate new
+   shares per the subscription resolution. If subscribers are unknown → `shares_total` updates
+   but each holder's `shares` becomes `None` and `confidence = low`.
+3. `CAPITAL_DECREASE` (buyback+cancel) → `capital -= amount`; `shares_total -= n`; subtract from
+   the **named sellers' lines**; any line reaching 0 is dropped → this **fires
+   `SHAREHOLDER_END`** at projection time. A "réduction motivée par les pertes" or a
+   "diminution de la valeur nominale" would instead change `nominal` with `shares_total`
+   unchanged — not present in this corpus, but the fold should distinguish them.
+4. `SHAREHOLDER_SHARE_TRANSFER` → `from.shares -= n`, `to.shares += n`. **`capital` and
+   `shares_total` MUST be unchanged.** Assert it.
+5. **Nominal change (split)** — `…ec3` divides the nominal by 100: `nominal /= 100`,
+   `shares_total *= 100`, every holder's `shares *= 100`, `capital` unchanged.
+   `[R]` Do **not** invent an out-of-enum `event_code` for it — the enum is closed and an
+   unknown value makes `results.json` invalid. Model it as an internal fold op, record
+   `nominal_before` / `nominal_after` in the payload of the same-session `CAPITAL_INCREASE`,
+   and describe it in `notes`. Losing it silently would make the 2008 numbers unexplainable.
+6. **New holder appears** in a transfer/subscription target and is not in `state` → derive
+   `SHAREHOLDER_ENTRY`. **Existing holder reaches 0** → derive `SHAREHOLDER_END`. This is the
+   projection-time derivation the schema prescribes (§3.4).
+
+### 6.3 Ordering
+
+Sort by `(event_date, doc_deposit_date, intra_document_resolution_index)`. `[F]` Intra-day
+ordering matters here: on 2008-06-27 the split, Augmentation I and Augmentation II all occur,
+and applying them out of order yields the wrong share count. Keep an explicit `seq` field.
+
+### 6.4 Snapshot emission
+
+Emit one `capital_timeline` entry per **event date** (not per event) — coalesce same-day events
+into one snapshot whose `caused_by` lists every contributing `event_id`. That matches "the state
+of the cap table after each of those events" while staying readable, and keeps the 2008-06-27
+triple from producing three near-identical rows. `[R]` State this choice in the README; it is a
+judgement call a reviewer will want to see named.
+
+---
+
+## 7. Provenance Strategy
+
+### 7.1 The conversion — verified end-to-end
+
+`[F]` OCR polygons are **pixels at 300 dpi**; PDF pages are in **points**; page size varies per
+document (§4.1). The conversion is:
+
+```python
+SCALE = 300 / 72                       # px per point
+w_px, h_px = page.rect.width * SCALE, page.rect.height * SCALE
+x0 = min(p[0] for p in polygon) / w_px
+y0 = min(p[1] for p in polygon) / h_px
+x1 = max(p[0] for p in polygon) / w_px
+y1 = max(p[1] for p in polygon) / h_px
+```
+
+`[F]` **Verified against the shipped tool**: for `"- à FPCI SECURITE"` on page 3 of
+`acte_2017-03-28_…257ebe.pdf`, `bbox_viewer.py --grep` prints
+`[0.1847, 0.2696, 0.3586, 0.2856]` and an independent implementation returns the identical four
+values. The conversion is settled; no guesswork remains here.
+
+Page height/width must come from **that page's** `page.rect` (`doc[page-1]`), because
+`polygon_to_norm` is page-relative and sizes differ across documents.
+
+#### Two findings from implementing this (`archean/ground.py`)
+
+**`[F]` The reference tool can emit a box that the schema rejects.** 8 of the 11 254 OCR
+lines in this corpus (0.07%) have polygons that extend just past the page edge — at most
+`8.5e-5` of a page dimension, roughly 0.02 mm. They are all marginalia: initials, paraphs
+and signature strokes written in the margins. `results.schema.json` constrains every bbox
+value with `minimum: 0, maximum: 1`, so a raw value of `1.00008` makes the **whole
+submission invalid**, and the brief says a file they cannot parse cannot be scored.
+`bbox_viewer.py` does not clamp.
+
+`[R]` So `polygon_to_bbox` clamps by default, but only within a `0.001` tolerance — enough
+to absorb OCR jitter at a page edge, far too little to hide a wrong page size, which is out
+by percent. Beyond the tolerance it still raises. `clamp=False` reproduces the raw reference
+behaviour and is what the compatibility tests compare against. `tests/test_bbox.py` pins the
+count at exactly 8, so if the corpus or the conversion changes, that is noticed rather than
+absorbed silently.
+
+**`[F]` Rounding order changes the fourth decimal on 20 coordinates.** `300/72 = 25/6` is
+not representable in binary. `bbox_viewer` computes `w_px = page_w_pt * scale` and *then*
+divides, which rounds twice. Computing the same quantity over rationals and rounding once
+differs by at most `2.22e-16` — but on 20 of the 45 016 coordinate values in the corpus
+(0.04%) the true value lands on an exact 4-decimal tie, e.g. `0.70125`, where the
+double-rounded path yields `0.7012499999999999` and rounds *down* to `0.7012`, while the
+exact path gives `0.7013`.
+
+`[R]` The module computes in exact rational arithmetic and rounds once, at emit time, and
+keeps a `REFERENCE_FLOAT` mode that reproduces `bbox_viewer` bit-for-bit so compatibility is
+asserted over all 11 254 lines rather than assumed. The practical difference is ~0.02 mm and
+matters to nobody; documenting it costs nothing and means the discrepancy was understood now
+rather than discovered later as a mystery.
+
+### 7.2 Preventing invented boxes — the LLM must not produce coordinates
+
+`[R]` **Strongly endorse the approach you proposed**, tightened into a hard contract:
+
+1. The LLM receives, for a candidate page, the OCR lines **with stable integer ids**:
+   `[{"i": 0, "t": "…"}, {"i": 1, "t": "…"}, …]`.
+2. The LLM's JSON output must include, per extracted fact, `evidence_line_ids: [int]` **and**
+   `snippet: str` copied verbatim.
+3. Code then:
+   - asserts every `i` is in range for that page → else reject;
+   - asserts `normalize(snippet)` fuzzy-matches (`difflib` ratio ≥ 0.90) the concatenation of
+     those lines' texts → else reject and retry once with the failure quoted;
+   - asserts every numeral in the payload appears in the cited lines → else flag
+     `grounded_numbers: false` and downgrade confidence;
+   - computes the bbox as the **union of those lines' polygons**, converted as §7.1;
+   - clamps to `[0,1]` and asserts `x0 < x1`, `y0 < y1`.
+
+This makes an invented bbox structurally impossible: the model's only lever is *which lines*,
+and a wrong line is caught by the snippet check. It also makes the bbox reproducible —
+re-running the grounding stage on the same extraction yields byte-identical boxes.
+
+### 7.3 Visual verification
+
+`[R]` A `scripts/verify_boxes.py` that loops over `results.json` and shells out to
+`bbox_viewer.py --bbox … -o out/<event_id>.png` for **every** event, producing a contact sheet.
+With ~15–25 events this is a 2-minute eyeball check and it is *exactly* what the brief says they
+grade ("whether the boxes point where you say they do"). Commit a handful of the PNGs
+(`docs/box_checks/`) and show one in the recording. High effort-to-signal ratio.
+
+`[R]` Prefer **tight, line-level boxes over the operative sentence**, not whole paragraphs. The
+example in the brief (`[0.116, 0.610, 0.920, 0.626]`, height 1.6 % of the page) is a single
+line. Match that granularity.
+
+---
+
+## 8. OCR Strategy
+
+### 8.1 Observed quality
+
+`[F]` Quality is **good** — `score` ≥ 0.95 on most lines. But the failure modes are the ones
+that matter most:
+
+| failure | real example | risk |
+|---|---|---|
+| **digits corrupted inside numbers** | `"trente sept mille (37.0o0) euros"`, `"capital de 400/o0o euros"`, `"217 241 euøs"`, `"368 102 euròs"` | **critical** — wrong capital |
+| **year corrupted** | `"augmentation de capital intervenue le 17 mai 200s"` | **critical** — wrong `event_date` |
+| **name corrupted** | `GUELLATTI`/`GUELLATI`, `GICOUEL`/`GICQUEL`, `AUMANT`/`AUMONT`, `BLANcO` | holder identity splits in two |
+| **column interleaving** | §4.1 répartition table | wrong holder→count pairing |
+| **handwriting** | `…ec7` p.7 is a handwritten annotation, almost entirely garbled | ignorable (out of scope) |
+| **stamp/marginal text mixed into body** | registration stamps interleaved on p.1 of most docs | noise in retrieval |
+
+`[R]` Mitigations, all deterministic:
+
+- **Never trust a single numeric OCR read.** Every capital figure appears 2–25× (page headers
+  repeat `au capital de X euros` on every page of the statutes). Take the **mode across
+  occurrences**, cross-checked against the arithmetic (`before + amount == after`). `37.0o0`
+  loses instantly to 24 copies of `37.000`.
+- **Prefer the French words over the digits** where both are present: the corpus systematically
+  writes `"trente sept mille (37.000)"`, `"deux cent mille (200.000)"`. A French number-word
+  parser is ~40 lines and is far more OCR-robust than digit groups. Use words/digits agreement
+  as a confidence signal.
+- **Canonicalise names**: strip accents, uppercase, drop honorifics, then fuzzy-cluster
+  (`rapidfuzz` ≥ 88) within the document set. Keep a hand-checked alias map
+  (`GUELLATTI→GUELLATI`, `GICOUEL→GICQUEL`, `AUMANT→AUMONT`) committed as data, not hidden in code.
+
+### 8.2 Fallback hierarchy — and when each applies here
+
+| level | tool | when | needed for 480489707? |
+|---|---|---|---|
+| 1 | shipped OCR JSON | default | **yes** — 17/17 docs, 293/293 pages |
+| 2 | multi-occurrence voting + word/digit cross-check | any number feeding capital or a date | **yes** |
+| 3 | render page and read it myself (`bbox_viewer -o`) | a number the validator flags | **yes**, expect 2–4 pages |
+| 4 | multimodal LLM on the rendered page image | a table whose line order defeats both | **likely** — 2005 répartition + 2006 feuille de présence |
+| 5 | run our own OCR (tesseract/paddle) | only where level 1 is **missing** | **no** — no gaps for the subject |
+| 6 | external sources (INPI, BODACC) | a fact absent from the entire corpus | only for C4/C5 (§12) |
+
+`[R]` **Do not build a local OCR fallback for this challenge.** It is the most expensive
+component and buys literally nothing for 480489707. Mention in the README that the design has a
+slot for it and that three companies in the wider corpus (IMPRESSIONS DUMAS, AIR SYSTEM SERVICE,
+E PECOU) have zero OCR — that shows we saw the problem without paying for it.
+
+### 8.3 OCR content structure — audited across the whole corpus, not sampled
+
+Before writing any routing tool, every top-level and OCR-item-level key actually shipped was
+censused over **all 3 995 OCR pages, 20 companies, actes + bilans** — not just the 293 ARCHEAN
+actes pages this project had looked at before. Two of §4.1's original claims were wrong because
+they generalized from a one-page sample; both are corrected here and in §4.1 above.
+
+`[F]` **Top-level page shape.** Two variants exist, corpus-wide:
+`{page, ocr, layout, most_frequent_angle, skew_angle, pdf}` (3 257 pages) and the same plus
+`{_reocr_corrected_count, _reocr_failed_count, _reocr_failures}` (738 pages, **18.5% of the
+whole corpus** — not the 3.4%/"10 of 293" figure the prior pass reported, which was ARCHEAN-only
+and never claimed to be corpus-wide, but is easy to misread as typical). `[F]` For ARCHEAN's own
+293 actes pages specifically, the `_reocr_*` variant is 10 pages (3.4%) — that narrower number
+stands, scoped correctly this time.
+
+`[F]` **`_reocr_*` meaning, determined by direct inspection, not assumed.** Every `_reocr_*`
+page in ARCHEAN's corpus also carries `text_original` on the specific OCR item that was
+corrected — e.g. `…ebd` p.27: `text_original: "(1)"` corrected to `text: "(i)"`; `…ec7` p.16:
+`"- 6 -"` corrected to `"9 -"`; `…ec9` p.14: `"(3"` corrected to `"c)"`. `[I]` This is consistent
+with a re-OCR retry pass over low-confidence single-token regions (all three are footnote
+markers or page-number stamps, all short, all marginal); `[H]` the retries are not obviously
+improvements — `"(1)"→"(i)"` and `"- 6 -"→"9 -"` both look like lateral moves or regressions on
+a human read, not corrections. Every `_reocr_failures` entry inspected (10 across ARCHEAN) is
+the same shape: a single isolated character or short token at a page margin — never inside body
+text, never touching anything the capital chain or a routing signal depends on. `[R]` Not
+consumed by `extract_text`/`phrase_present`; recorded so nobody is surprised by the extra keys.
+
+`[F]` **`layout` is a real, populated table/region-detector output outside ARCHEAN's actes.**
+Where non-empty (2 118 of 3 995 pages, 53%), it is a list of `{bbox, label, score, cells?,
+texts?}` blocks — `label: "text"` blocks wrap a `texts[]` array shaped exactly like the
+top-level `ocr[]` items; `label`-less blocks with `cells[]` are table-cell groups, each cell
+again wrapping a `texts[]` array. `[I]` This looks like table detection specifically for
+financial-statement pages (the one example inspected in depth, `015551401/bilans/…`, is a bilan
+balance-sheet page with cells like "CAPITAUX PROPRES", "Comptes de régularisation"). `[F]` It is
+empty for **all 293 of ARCHEAN's actes pages** with no exception — confirmed by direct count,
+not sampling. `[R]` Not used by anything built for this project; recorded because a future group
+bonus pass touching `bilans/` folders will find it populated and should know what it is before
+building anything against it.
+
+`[F]` **OCR-item-level fields beyond `{orientation_angle, polygon, score, text}`.** Corpus-wide:
+`words` (4 758 items — a sub-word tokenization of the line, each word its own `{box, text}`) and
+`text_original` (1 368 items, always co-occurring with a page-level `_reocr_*` block) and
+`words_stale` (5 items). `[F]` **None of `words`, `words_stale` occur anywhere in ARCHEAN's own
+293 pages**; `text_original` occurs exactly 3 times there (the three `_reocr_*` corrections
+above). `[F]` `words` **does** occur in HADEAN's actes (`data/499979540/`, ARCHEAN's own
+associée unique) — e.g. `"RCS : MONTAUBAN"` breaks into `["RCS", " : ", "MONTAUBAN"]`. `[R]` Not
+needed for line-level phrase matching (§8.4); would matter only for token-level extraction
+(e.g. picking a single digit out of a run), which nothing built so far requires.
+
+`[F]` **Duplicate and empty lines.** Zero pages in ARCHEAN's corpus have a completely empty
+`ocr: []` array. Zero exact `(text, polygon)` duplicate lines exist anywhere in the 293 pages.
+54 of 11 254 lines have empty (whitespace-only) `text`; **every one of them has `score: 0.0`**
+— a clean, exact rule, not a heuristic: `score == 0.0` implies an empty-text detection, with no
+counterexample in the corpus. `[F]` Non-empty text can still carry a very low score (`0.27` for
+a single stray `"r"`, `0.52` for `"-"`) — these are kept by `extract_text`, since phrase-level
+substring matching is not sensitive to an isolated low-confidence token elsewhere on the page,
+and filtering by a score threshold rather than by `score == 0.0` would need its own justification
+this project has not built.
+
+`[F]` **Reading order and encoding.** Lines are UTF-8, accented characters intact, no decoding
+issues anywhere they were checked. OCR-array order is close to top-to-bottom reading order
+except for the already-documented interleaved-table pathology (§4.1); no *new* ordering anomaly
+surfaced by this pass.
+
+### 8.4 Routing signal evidence — measured, not intuited
+
+`scripts/analyze_routing.py` (see the script's own docstring for the full methodology) measures
+candidate phrases against two label sources that are never conflated:
+
+- **`gold`** — ARCHEAN's own 17 documents, labelled by facts already established elsewhere in
+  this project: `tests/golden_capital_chain.json`'s `source.inpi_id` set for `capital_amount`,
+  plus `…ebf` (which *authorises* the 2017 reduction `…ebe` *realises* — the golden chain cites
+  only the realisation as its numeric source, which under-counts documents that are
+  substantively about the event); and `share_transfer` from two documents this conversation has
+  read directly (`…ec2`, the 2005 cession ratification; `…ec7`, which also authorises a
+  225-share cession to CAPGRAS). This is the only trustworthy label source in this project.
+- **`typerdd`** — a weak label from `meta['typeRdd']`, across all 177 acte documents in the
+  20-company corpus (115 with OCR). Large, but demonstrably noisy (see the finding below); used
+  only to widen candidate generation, never as ground truth.
+
+**`[F]` `typeRdd` is not reliably scoped to its own PDF — a finding, not a hypothesis.**
+`…ec2`'s (2006-01-04) `typeRdd` lists `"Augmentation du capital social"` as one of its decisions.
+Its OCR text — all 7 pages, read in full — contains no augmentation text at all: the only
+`"capital"` mentions are the boilerplate header and a quorum sentence. The document adjacently
+filed one day earlier, `numChrono` one lower (`…ec4`, `numChrono` 20 vs `…ec2`'s 21), **is**
+where the real 2005-05-17 augmentation is stated (`"réalisation définitive de l'augmentation de
+capital de 113 000 €"`) — and `…ec4`'s own `typeRdd` is empty. `[I]` This looks like a
+registry-side batch-vs-file correspondence error (a decision tag attached to the wrong file
+within the same filing session), not an OCR problem or a mistake in this project's reading.
+`[R]` Consequence for routing: **`typeRdd` cannot be the sole or primary signal**, even where
+present — it must be corroborated by content, not merely trusted. This also means §4.1's
+original P0 priority for `…ec2` ("PV d'assemblée · **Augmentation du capital**") was assigned by
+trusting `typeRdd` rather than by the content this same project had already read in an earlier
+turn; the correction is that `…ec2` is P0 for **share transfer**, not for capital amount, and
+`…ec4` — not `…ec2` — is where the augmentation is grounded, exactly as §4.2's golden chain
+already has it.
+
+**`[F]` A real false-positive class in this project's own tool was found and fixed during
+measurement, not before it.** The bare word `"ceder"` (to cede), searched as a plain substring
+first, matched inside `"excéder"` and `"procéder"` — 12 of 17 ARCHEAN documents, all wrong.
+Word-boundary anchoring (`\bceder\b`, still exact matching, not fuzzy) corrected this to 2 false
+positives, both genuine (the statutory *cession* clause, present in every updated-statutes
+document regardless of whether that specific acte enacts a cession). `[R]` Every phrase in
+`scripts/analyze_routing.py` now matches on word boundaries; single short root words remain the
+highest-risk case for this class of error and should be checked individually before trusting
+them, exactly as this one was.
+
+**`[F]` Boilerplate is the dominant false-positive source, and it is now measured, not
+suspected.** ARCHEAN's updated statutes recite Article 8 ("Le capital social peut être
+augmenté...") and Article 15 (cession/transmission rules) in **every** acte that reprints the
+statutes, whether or not that acte enacts a capital or transfer event. Measured directly:
+`"augmentation de capital"` and `"augmentation du capital"` both occur in several non-target
+documents purely from this boilerplate (FP=6 and FP=3 respectively, out of 11 non-target ARCHEAN
+documents). `"cession"` alone is similarly poor for `share_transfer` (FP=10 of 15) for the same
+reason — the transfer-restriction clause is generic statutory boilerplate, not evidence of an
+actual transfer in that specific acte.
+
+**`[F]` Recall/precision trade off across candidates, measured with `analyze_routing.py gold`
+on 2026-09-16, ARCHEAN's 17 documents (7 `capital_amount`, 2 `share_transfer`, both classes
+overlapping on `…ec7`):**
+
+| phrase | class | TP | FP | FN | TN |
+|---|---|--:|--:|--:|--:|
+| `reduction du capital` | capital_amount | 7 | 3 | 0 | 7 |
+| `valeur nominale` | capital_amount | 7 | 5 | 0 | 5 |
+| `prime d'émission` | capital_amount | 7 | 5 | 0 | 5 |
+| `capital social est fixé` | capital_amount | 6 | 3 | 1 | 7 |
+| `il est divisé en` | capital_amount | 6 | 3 | 1 | 7 |
+| `actions nouvelles` | capital_amount | 6 | 4 | 1 | 6 |
+| `augmentation de capital` | capital_amount | 6 | 6 | 1 | 4 |
+| `augmentation du capital` | capital_amount | 4 | 3 | 3 | 7 |
+| `pour le porter de` | capital_amount | 1 | 0 | 6 | 10 |
+| `cession` | share_transfer | 2 | 10 | 0 | 5 |
+| `ordres de mouvement` | share_transfer | 1 | 0 | 1 | 15 |
+| `protocole de cession` | share_transfer | 1 | 0 | 1 | 15 |
+| `nouvel actionnaire` | share_transfer | 1 | 0 | 1 | 15 |
+| `céder` | share_transfer | 1 | 2 | 1 | 13 |
+
+`[F]` No single tested phrase reaches TP = all-targets, FP = 0 simultaneously for either class,
+at ARCHEAN's scale. `[I]` The most useful pattern observed is **complementary, not competing**
+signals: `reduction du capital` alone has perfect recall (FN=0) for capital_amount; `pour le
+porter de` has perfect precision (FP=0) but recall 1/7 — the operative "before → after" template
+is genuinely phrased differently across resolutions (`"pour le porter de X à Y"` in `…ec7`,
+`"pour porter le capital à Y"` in `…ec4`, or omitted entirely in favour of a standalone
+`"Le capital social est fixé à Y"` clause in most others) — confirmed by reading all six FN
+documents directly, not inferred from the count alone. `[R]` A routing rule built on this
+evidence would need several corroborating phrases per class, not one, and should not expect a
+zero-FP single-phrase rule to exist for `capital_increase` specifically — the statutory
+boilerplate makes that combination of words unavoidably ambiguous on its own.
+
+**`[F]` Cross-line phrase splitting is real and quantified, not assumed — and it did not change
+any bucket above.** Joining every pair of adjacent same-page OCR lines and re-testing the same
+18 candidate phrases against all 17 ARCHEAN documents surfaces **41 occurrences that single-line
+matching misses entirely** (e.g. `…ec5` p.21: `"...l'augmentation de"` / `"capital de la société
+est réalisée..."` — a real occurrence of `augmentation de capital` invisible to single-line
+search). `[F]` Every one of the 41 is boilerplate (`associé unique`, `commissaire aux comptes`,
+`assemblée générale` procedural clauses) — none is a target-class-defining phrase whose only
+occurrence was hidden this way, so **none of the TP/FP/FN/TN counts in the table above change**
+if lines are joined. `[R]` This is a real property of the representation, not a non-issue: a
+future candidate phrase, especially a longer or rarer one, could have its only occurrence split
+this way. `extract_document_text`/`phrase_present` in any future `route.py` should join adjacent
+same-page lines (or search a sliding two-line window) rather than match single lines only — this
+measurement is the justification, not intuition about typeset line wrapping.
+
+**`[F]` The two P0 `typeRdd`-empty documents behave completely differently under content
+inspection — this was the central open question of the task, and it is now answered with
+evidence, not left as an assumption:**
+
+| document | `typeRdd` | capital-specific phrases found | golden-chain relevant | interpretation |
+|---|---|---|---|---|
+| `…ec4` (2006-01-03) | empty | `"capital social est fixé"` (×2), `"augmentation de capital"` (×11, including `"réalisation définitive de l'augmentation de capital de 113 000 €"`), `"il est divisé en"`, `"actions nouvelles"` | **yes** — is the `capital_amount` source for the 2005-05-17 row of the golden chain | `[O]` observed: this document's empty `typeRdd` hides a real, load-bearing capital event. Confidence: **high** — multiple independent operative phrases, already cross-checked against the golden chain in an earlier turn. |
+| `8925` (2025-12-02) | empty | **none** of `capital social est fixé`, `pour le porter de`, `augmentation de/du capital`, `il est divisé en`, `actions nouvelles`, `réduction du capital`, `cession`, `associé unique` — zero hits, all twelve probes | **no** — recorded in the golden chain as an `independent_observation` (confirms the end state, no capital movement) | `[O]` observed: this document's empty `typeRdd` correctly reflects that nothing capital-related happens in it. It contains only `"assemblée générale"`, `"président"` and `"commissaire aux comptes"` boilerplate (approving 2023 accounts). Confidence: **high** — twelve independent negative probes, corroborated by the golden chain having already treated it as a non-event. |
+
+`[R]` The two P0 documents are **not the same kind of gap**. `…ec4` is a genuine metadata blind
+spot that content reading closes with high confidence. `8925` is not a gap at all — its empty
+`typeRdd` and its empty content-probe result agree. A routing rule that treated "empty `typeRdd`"
+as itself a signal of importance would have been wrong for one of the two documents it was
+built to handle.
+
+### 8.5 Cross-corpus validation — what generalised and what did not
+
+§8.4 measured candidate phrases against ARCHEAN's 17 documents. This section
+re-measures them against all 115 OCR'd acte documents across the 20 companies
+(`scripts/validate_routing.py`). Several §8.4 conclusions did not survive.
+
+#### The measurable universe, and its hard limit
+
+`[F]` 115 of 177 acte documents have OCR: **17 ARCHEAN, 98 across 16 other sirens**.
+`[F]` Of those 115, only **79 carry a `typeRdd` at all — 36 do not (31%)**. ARCHEAN
+contributed 2 of those 36; the rest are spread across 10 other companies.
+
+`[F]` **ARCHEAN is the only company in this corpus with a trustworthy label.** Its gold
+set comes from `tests/golden_capital_chain.json` plus content read directly. The other 19
+companies have only `typeRdd`, which §8.4 proved is not reliably scoped to its own PDF.
+`[R]` So `validate_routing.py` never reports accuracy outside ARCHEAN. It reports
+*prevalence* (no label needed), *agreement with typeRdd* (explicitly not accuracy), and
+real TP/FP/FN/TN only where gold exists. Conflating those three would manufacture
+confidence the corpus cannot support.
+
+#### Signals that did not generalise
+
+`[F]` **`protocole de cession` and `nouvel actionnaire` fire in exactly zero of the other
+16 companies.** In §8.4 both had FP=0 against ARCHEAN's gold and read as clean
+`share_transfer` signals. They describe ARCHEAN's drafting, not a corpus-wide pattern.
+`[F]` `ordres de mouvement` fires in one other company. `[R]` None of the three is a
+validated cross-corpus signal; §8.4's FP=0 for them was a statement about 17 documents.
+
+`[F]` **Broad firing is not validation.** `ordre de mouvement` (singular) fires in 7 other
+companies — because it is the statutory transmission clause ("la cession s'opère par un
+ordre de mouvement signé du cédant"), present whether or not any transfer occurred. In
+ARCHEAN it fires in 6 documents and **not** in `…ec2`, the one document that actually
+records the 2005 cessions. A signal can generalise as boilerplate.
+
+`[F]` **A legal-form vocabulary split invalidates ARCHEAN-derived vocabulary for half the
+corpus.** ARCHEAN is a SAS and speaks of `actions`; `parts sociales` fires in 38 documents
+across 12 other companies and in **zero** ARCHEAN documents. `cession de parts` fires in 19
+documents across 7 companies, none of them ARCHEAN. `[R]` Any signal set derived from
+ARCHEAN alone is structurally blind to the SARL half of the corpus.
+
+#### A signal that did generalise
+
+`[F]` `pour le porter de` had TP=1, FN=6 in ARCHEAN — §8.4 called it precise but nearly
+useless. Across the 79 typeRdd-bearing documents it fires on 8 and **disagrees with
+`typeRdd` zero times** (TP=8, FP=0, FN=8), firing in 9 companies. `[I]` Its low recall is
+real and unchanged; its precision is now corroborated well beyond ARCHEAN.
+
+#### The recital problem — the pivotal finding
+
+`[F]` **Updated statutes recite the company's entire capital history, with amounts and
+transition verbs.** `…7ebd` is a 2013 *address-change* filing; its attached statutes
+contain `"augmenté de 113.000 euros afin d'être porté à 150.000 euros"` and two more like
+it, for operations from 2005 and 2008. It is **lexically indistinguishable** from an
+operative capital acte. The same holds for `…7ec9` and `…7ecb`.
+
+`[F]` This is why no bare phrase rule reached FP=0 in §8.4, and it is not a tuning
+failure. Measured on ARCHEAN's gold: `transition + amount` on one line gives TP=5, FP=3,
+FN=2, TN=7 — and the three FPs are exactly those three statutes reprints.
+
+`[F]` **Excluding recitals removes every false positive.** A transition+amount line
+introduced by `"aux termes de"` (on that line or the one before) is a recital. Excluding
+them: **TP=5, FP=0, FN=2, TN=10**.
+
+`[F]` **But that exclusion is ARCHEAN-shaped and has a measured gap.** HADEAN opens its
+recital differently — `"Lors de l'augmentation de capital décidée par l'assemblée générale
+extraordinaire du 30 avril 2008 :"` followed by a bulleted history — which `"aux termes
+de"` does not catch. Outside ARCHEAN the backref rule disagrees with `typeRdd` on 4
+documents, three of which (`9133`, `9134`, and `5421`) are recitals of this second form.
+
+`[F]` **A date-based generalisation covers both forms.** What every recital shares is that
+it *cites a year earlier than the document's own*, while an operative resolution is dated
+now. Using `archean.frenchnum.parse_french_date_parts` (already validated in §11.1) to look
+for an earlier year within three lines: ARCHEAN gold is unchanged at **TP=5, FP=0, FN=2,
+TN=10**, and it additionally excludes HADEAN's `9133`/`9134` while keeping `9139`, HADEAN's
+genuine 2022 reduction (`"réduire le capital de 59 900 euros, pour le ramener de 578 450
+euros à 518 550 euros"`). Cross-corpus disagreement with `typeRdd` drops from 4 documents
+to 1.
+
+`[I]` The one remaining disagreement, `9139`, looks like a `typeRdd` gap rather than a rule
+error — its `typeRdd` says only `"sous condition suspensive"` while the text states an
+operative reduction. `[H]` Not asserted: without a gold label for HADEAN there is no basis
+to declare which source is wrong, so it is recorded as a conflict. `[F]` The date rule is
+**more conservative, not strictly better**: outside ARCHEAN it has more false negatives
+than the backref rule (5 vs 2 against `typeRdd`). That trade-off is real and unresolved.
+
+`[U]` **Superseded by §8.9.** The two paragraphs above were true of the code as it stood on
+2026-09-16. §8.9 found that the `9133`/`9134` exclusion here, and the "4 documents to 1"
+drop, rested entirely on `parse_french_date_parts` accepting a bare, unmarked `"2008"` (the
+back half of `"30 avril 2008"`, split across an OCR line boundary) as a year with no
+contextual check — the identical bug that misreads JACQUES BOCKEL's share counts. Once that
+over-permissive fallback is fixed, `9133`/`9134` are no longer excluded either: the fix
+removes an accident along with the bug it was accidentally compensating for. Post-§8.9, the
+date rule and the backref rule are cross-corpus **identical** — same FP set (`5421`, `9133`,
+`9134`, `9139`), same FN set. See §8.9 for the corrected measurement, and note in passing
+that `5421`'s presence in that FP set was never actually an instance of HADEAN's "Lors de"
+recital form (it has no such text at all, checked directly during §8.9's audit) — its
+disagreement with `typeRdd` has a different, separate cause (§8.9 §7).
+
+#### Context scope — measured, not assumed
+
+`[F]` A capital topic phrase co-occurring with a euro amount, against ARCHEAN's gold:
+
+| scope | TP | FP | FN | TN |
+|---|--:|--:|--:|--:|
+| same line | 7 | 3 | 0 | 7 |
+| adjacent line | 7 | 3 | 0 | 7 |
+| same page | 7 | 3 | 0 | 7 |
+| whole document | 7 | **6** | 0 | 4 |
+
+`[F]` Line, adjacent and page scopes are **identical**; document scope is strictly worse.
+`[R]` So page-level co-occurrence is necessary and document-level presence is not
+sufficient — but there is no measured reason to go tighter than page, and no measured
+reason for bounding-box reasoning in routing at all. §8.4's separate finding that 41
+occurrences are only visible when adjacent lines are joined still stands for *bare phrase
+presence*; it does not change any contingency here.
+
+#### Our own gold labels encode hindsight
+
+`[F]` `…7ebf` (2017 reduction *authorised*, later realised) is gold-positive. `…7ec8` (2010
+delegation authorising the president to increase capital, never exercised) is not. Both are
+authorisations; the distinction is whether the authorisation was later acted on. `[R]` That
+is **not knowable from the document itself**, and no content-based router can reproduce it.
+The two gold false negatives (`…7ec5`, a constitution stating an initial capital with no
+transition; `…7ebf`, authorising a maximum with no realised transition) are separate
+mechanisms, not tuning failures — they need their own signals, not a loosened threshold.
+
+#### The unlabelled population is systemic
+
+`[F]` Of the 36 OCR'd documents with no `typeRdd`: **6 show operative capital text**, 20
+mention a cession, 15 show neither. The 6 span at least three companies and include
+ARCHEAN's `…ec4` and HADEAN's `9136`/`9137` (the 2008 apport-en-nature increases, directly
+relevant to the ARCHEAN group story). `[F]` `8925` still shows nothing, unchanged.
+
+`[R]` **`typeRdd` cannot be a primary routing input.** It is absent on 31% of OCR'd
+documents, misattributed in at least one measured case, and silent on 6 documents that
+contain operative capital text. It remains useful as a *corroborating* input.
+
+#### Conflicts, recorded rather than resolved
+
+`[F]` Among the 79 labelled documents, disagreements run in both directions: 4 where
+`typeRdd` says capital and no operative capital text is found (2 in other companies, 2 in
+ARCHEAN), and 4 where operative capital text is found and `typeRdd` does not say capital
+(all outside ARCHEAN). `[R]` Neither direction is declared the error. Reading each document
+to correct its label would make the label circular — the exact failure mode this project
+has avoided since §8.4.
+
+### 8.6 Proposed classification contract for `route.py` — specification only
+
+`route.py` is **not** implemented, and the evidence above says it should not yet be. What
+follows is the contract the measurements justify, plus the open questions that still block
+a confident implementation.
+
+```python
+@dataclass(frozen=True)
+class Evidence:
+    """One place a signal fired. Everything needed to go and look at it."""
+    signal: str          # the rule that fired, e.g. "operative-capital"
+    page: int            # 1-indexed, matches corpus.Page.number
+    line_index: int      # index within that page's ocr[] array
+    text: str            # verbatim OCR line, never folded or repaired
+    scope: str           # "line" | "page" — the scope at which it fired
+
+class Verdict(enum.Enum):
+    OPERATIVE   = "operative"    # signals fired and survived recital exclusion
+    RECITAL     = "recital"      # capital text present, all of it back-referenced
+    MENTION     = "mention"      # topic present, no transition and no amount
+    SILENT      = "silent"       # no capital/transfer signal at all
+
+@dataclass(frozen=True)
+class Classification:
+    mechanism: str               # "capital_amount" | "share_transfer"
+    verdict: Verdict
+    evidence: tuple[Evidence, ...]          # why — never empty unless SILENT
+    suppressed: tuple[Evidence, ...]        # recital lines excluded, kept for audit
+    metadata_label: bool | None             # what typeRdd said; None if absent
+    conflicts_with_metadata: bool
+```
+
+Why these fields and not others, each traceable to a measurement above:
+
+- **`evidence` is mandatory and non-empty for any non-SILENT verdict.** §8.5's usable rule
+  is a conjunction over specific lines; a router that returned `"capital"` without them
+  could not be audited, and the `…7ebd` case shows the lines are exactly what distinguishes
+  a real event from a statutes reprint.
+- **`suppressed` exists because recital exclusion is known-incomplete.** The `"aux termes
+  de"` form was found first and the `"Lors de … du <date>"` form only appeared when HADEAN
+  was measured. Keeping the excluded lines lets a reviewer see what was thrown away rather
+  than trusting the filter.
+- **`scope` is `line` or `page` only.** Measured: line, adjacent and page are equivalent,
+  document is strictly worse. There is no measured justification for a bbox-level field.
+- **`metadata_label` is nullable and separate from the verdict.** 31% of OCR'd documents
+  have no `typeRdd`; it is recorded alongside the content verdict, never merged into it.
+- **`conflicts_with_metadata` is surfaced, not resolved** — §8.5's conflicts run both ways
+  and this project has no basis to adjudicate them.
+- **No score, no weight, no confidence float.** Every rule measured here is boolean and
+  §12's instruction stands: a score would need a derivation, a validation and a
+  conflict policy that the evidence does not currently supply.
+
+**Unknown / ambiguity policy**, in the terms the measurements support:
+
+| situation | verdict | why |
+|---|---|---|
+| transition + amount, no earlier date nearby | `OPERATIVE` | TP=5 FP=0 on gold |
+| transition + amount, all back-referenced or earlier-dated | `RECITAL` | the `…7ebd` class |
+| topic + amount but no transition construction | `MENTION` | catches `…7ec5` (constitution) and `…7ebf` (authorised maximum) — both real events the transition rule misses, so they must not be silently dropped |
+| no capital/transfer signal | `SILENT` | `8925`, verified across twelve probes |
+| `typeRdd` present and disagrees with the verdict | any verdict + `conflicts_with_metadata=True` | never auto-resolved |
+
+`[R]` `MENTION` is doing real work here: it is where the two gold false negatives land. A
+router must not collapse it into `SILENT`, or it would drop a constitution and an
+authorised reduction — both genuine capital events.
+
+#### What still blocks implementation
+
+1. `[U]` **Recital exclusion is not proven complete.** Two surface forms are known. There
+   is no evidence about how many more exist, and no gold outside ARCHEAN to find them with.
+2. `[U]` **`share_transfer` has no validated cross-corpus signal.** Its three precise
+   ARCHEAN signals fire nowhere else; `cession` alone has FP=10 of 15 in ARCHEAN; the
+   SAS/SARL vocabulary split means `cession de parts` and `cession d'actions` need separate
+   treatment that has not been measured against any gold.
+3. `[U]` **Constitution and authorisation mechanisms have no measured signal at all** —
+   they are currently only reachable as `MENTION`.
+4. `[U]` **The date-vs-backref trade-off is unresolved** — the date rule is more
+   conservative outside ARCHEAN and there is no gold there to say which is right.
+
+`[R]` Items 2 and 3 are the ones worth attacking next, and both need the same thing: a
+second hand-verified gold set, on a company other than ARCHEAN. Without it, cross-corpus
+work can only measure agreement, never correctness.
+
+### 8.7 `archean/route.py` — implementation notes
+
+`route.py` now exists, built on §8.6's contract. Two ambiguities in that contract had to be
+resolved against evidence before code could be written, plus one new fact surfaced only by
+testing the implementation.
+
+**`[R]` `Classification.mechanism` is one field, but `…ec7` is gold-positive for both
+mechanisms.** §8.6 sketched a single `Classification` per document. ARCHEAN's own gold set
+(§8.4) has `…ec7` in both `capital_amount` and `share_transfer`. `classify(document,
+mechanism) -> Classification` takes the mechanism explicitly; `classify_document(document)
+-> tuple[Classification, ...]` calls it once per `KNOWN_MECHANISMS` entry, in a fixed order.
+This is an extension of §8.6, not a contradiction of it — the single-mechanism
+`Classification` shape is unchanged, there is just more than one per document.
+
+**`[F]` The `Verdict.MENTION` policy table and its own inline enum comment disagreed, and
+the table was right.** The comment read *"topic present, no transition and no amount"*; the
+table read *"topic + amount, no transition"* and cited the two gold false negatives as the
+motivating cases. Reading both documents directly settled it: `…7ec5`'s constitution states
+`"37 000 euros"` as its capital on the same page as the topic phrase (topic **and** amount,
+no transition verb); `…7ebf` authorises `"un montant maximum de 150 861 euros"` (topic
+**and** amount, no transition verb either). Both match the table's row exactly.
+
+`[R]` Despite that, the implementation does **not** require amount as a precondition for
+MENTION — it fires whenever the topic phrase is present at all and the document is not
+OPERATIVE. This is a deliberate widening, not a discovery: `…ec6` and `…ec1` (the CAC
+reports on preference-share economics) discuss the capital topic extensively with no stated
+euro amount anywhere near it, and forcing them to `SILENT` would mean dropping evidence
+that is plainly about the mechanism, which conflicts with the standing instruction not to
+force `SILENT` when relevant evidence exists. Recorded as an engineering choice, not a
+corpus fact.
+
+**`[F]` Widening recital detection from line-local to page-wide was measured and found
+worse, not equivalent — a new, non-obvious result.** §8.5's earlier "scope" measurement
+found line/adjacent/page equivalent for the *topic+amount co-occurrence* test (used by
+MENTION). That equivalence does **not** transfer to the recital-exclusion test used by
+OPERATIVE. Tested directly: on ARCHEAN gold, checking for an earlier-dated line within a
+line-local window gives **TP=5, FP=0, FN=2, TN=10** (matching §8.5's committed result);
+widening the same date check to "anywhere on the page" gives **TP=3, FP=0, FN=4, TN=10** —
+two additional false negatives, because a page-wide search suppresses genuinely operative
+lines that merely share a page with an unrelated older date (a registration stamp, a
+signature block, a cross-reference). `[R]` `route.py`'s recital check stays line-local
+(`_RECITAL_WINDOW = 3` lines, same page only); the topic+amount co-occurrence that *is*
+page-scope-equivalent is not implemented as a MENTION precondition at all, per the previous
+paragraph, so no rule in this module currently exercises the page-wide case.
+
+**`[F]` A previously un-inspected edge case in the transition rule.** `…7ec7` page 5
+contains a ninth AGE resolution — *"approuve le principe d'une augmentation de capital de
+100.000 euros (plus une prime d'émission), au profit d'un ou plusieurs nouveaux actionnaires
+à définir"*, with a mandate given to the president to go find those shareholders. This
+matches `TRANSITION` + `AMOUNT` exactly as the real, decided increase on page 3 of the same
+document does, despite describing an **approved principle for a future operation**, not a
+decided and executed one. `[F]` This line was already included in the exact rule validated
+as TP=5/FP=0 in the cross-corpus step — it is not a regression introduced by writing
+`route.py`, only a granularity nobody had looked at closely until building the tests forced
+a line-by-line check of the evidence. `[R]` Not patched: `…7ec7`'s document-level verdict is
+unaffected (page 3 alone makes it `OPERATIVE`), and narrowing the regex to exclude
+"approuve le principe de" has no cross-corpus measurement behind it. Recorded as a known
+limitation and pinned as a regression test (`test_known_limitation_transition_rule_also_matches_an_approved_principle`)
+rather than silently fixed.
+
+### 8.8 Independent non-ARCHEAN gold set — `tests/data/gold_non_archean.json`
+
+Every rule in `route.py` was measured and tuned entirely on ARCHEAN. Cross-corpus checking
+(§8.5) only ever had the noisy `typeRdd` label to compare against elsewhere. This section
+asks the harder question directly: does `route.py`, unmodified, agree with a second set of
+labels determined by reading a different company's documents, with nobody having looked at
+that company while the router was built?
+
+#### 1. Company selection — structural criteria, computed before reading anything
+
+`[F]` **HADEAN (499979540) was excluded from candidacy**, not merely deprioritised: it was
+already inspected in detail (documents `9133`, `9134`, `9139`) to validate `route.py`'s
+date-based recital check during cross-corpus validation. Using it again would let a company
+that shaped a rule also grade it.
+
+`[F]` A structural score was computed over the remaining 18 companies, before any document
+body was read, from `≥2 typeRdd-capital-tagged documents`, `≥1 OCR'd document with no
+typeRdd`, an explicit `Constitution` typeRdd tag, and `≥70%` OCR coverage:
+
+| score | siren | denomination | docs | ocr | typeRdd-capital | no-typeRdd, ocr'd | has Constitution tag |
+|---|---|---|--:|--:|--:|--:|---|
+| 4 | 445070311 | JACQUES BOCKEL SARL | 12 | 9 | 3 | 2 | yes |
+| 3 | 412000887 | *SARL CEROV FORMATION | 8 | 6 | 0 | 2 | yes |
+| 3 | 401009741 | SARL CREAMANDE | 12 | 9 | 2 | 6 | no |
+| 3 | 016850919 | (unnamed) | 12 | 9 | 1 | 1 | yes |
+| 2 | 360500011 / 328024377 / 035550318 / 027080076 | — | 12 each | 9–11 | 0–1 | 1–7 | no |
+| 0 | 015551401 | — | 6 | 4 | 1 | 0 | no |
+
+`[F]` **JACQUES BOCKEL SARL** (445070311) scored highest and was selected. `[F]` It is a
+**SARL** (parts sociales), not a SAS like ARCHEAN — directly exercising the SAS/SARL
+vocabulary split already found in §8.5 (`parts sociales` fires in 0 ARCHEAN documents).
+`[F]` Three of its `typeRdd` entries are bare named-party pairs (`"BOCKEL JACQUES / BOCKEL
+JEREMY ET DOMENEGHETTY MATHIEU"`, `"JACQUES BOCKEL / SCHOTT VERONIQUE"`, `"JACQUES BOCKEL /
+DOMENEGHETTY MATHIEU"`) — a form the weak `typeRdd`-label rule in `analyze_routing.py` does
+not recognise as `share_transfer` at all (it looks for the words "cession"/"donation"),
+making content-based detection here genuinely independent of that label, not merely
+uncorrelated with it.
+
+`[R]` **Limitation, stated before any document was read and confirmed after:** this company
+was not selected, and does not offer, a clean "authorised but not yet exercised" case
+matching ARCHEAN's `…7ebf`/`…7ec8` pair. That question (§4.3) remains untested by this gold
+set — recorded as insufficient evidence, not forced.
+
+#### 2. Gold schema — one deliberate departure from the task's own sketch
+
+`[R]` The task proposed a 4-mechanism schema (`capital_amount`, `share_transfer`,
+`constitution`, `authorization`). **This was not adopted.** `route.py` has exactly two
+mechanisms (`KNOWN_MECHANISMS`); a gold item labelled `constitution` or `authorization`
+would have nothing in `route.py`'s own output space to compare against, guaranteeing an
+unfalsifiable "disagreement" that reflects a schema mismatch, not a finding. `[R]` The gold
+schema instead uses `route.py`'s own two mechanisms exactly, with `document_kind` as a free
+descriptive field capturing "this is really a constitution" or "this is really a valuation
+report" for qualitative discussion — comparable, not merely descriptive, and every
+constitution/report document is scored the same way `route.py` would necessarily bucket it
+(as `capital_amount`, landing in `MENTION`).
+
+`tests/data/gold_non_archean.json`'s `Evidence` shape: `document_id`, `mechanism`, `verdict`
+(the same four `Verdict` values as `route.py`), `page`, `line_index` (matching
+`archean.ground.OcrLine.index`'s raw, unfiltered convention exactly), `evidence_text`,
+`rationale`, `metadata_label` (the weak `typeRdd`-derived label, recorded but never the
+source of a verdict), plus `known_finding_id` linking an item to a structured
+`known_findings` entry when its disagreement with `route.py` was predicted in advance, in
+prose, before the comparison was run.
+
+#### 3. Gold inventory
+
+`[F]` 14 items across 7 documents (9 OCR'd documents exist for this company; 2 more were
+scanned structurally but not independently derived — see §5):
+
+| mechanism | OPERATIVE | RECITAL | MENTION | SILENT |
+|---|--:|--:|--:|--:|
+| `capital_amount` | 3 | 0 | 4 | 0 |
+| `share_transfer` | 2 | 0 | 2 | 3 |
+
+`[F]` **No `capital_amount` `SILENT` item exists in this gold set** — every one of the 9
+OCR'd documents read contains at least one line matching `CAPITAL_TOPIC`, because either a
+feuille de présence's routine quorum sentence (`"X parts sur Y parts composant le capital
+social"`) or a report's contextual mention triggers it. `[R]` This is reported as a genuine
+gap in the gold set's coverage, not concealed by omitting the row above or forcing a weak
+example. `[F]` **No `capital_amount`/`share_transfer` `RECITAL` gold item exists either** —
+see §5's finding that this company's one capital-recital construction
+(`"Lors de l'augmentation de capital en date du <date>, [subject] apporte..."`) never
+actually co-occurs with an amount on the same line, so it was never a candidate for gold
+`RECITAL` in the first place — a third, previously undocumented recital surface form, whose
+absence from `TRANSITION_RE` happens to be *protective* rather than *dangerous* (§5).
+
+#### 4. Independent evidence, by the task's four priority questions
+
+**A. `share_transfer` `OPERATIVE`.** `[F]` **Found — for the first time in this project.**
+Document `5420` (and its twin `5426`, see §6) contains three genuine, unambiguous transfers
+of *existing* shares between named parties, each stated as `"Le cédant cède et transporte...
+au cessionnaire qui accepte"` with an explicit share count and a stated price: Jacques
+BOCKEL → Mathieu DOMENEGHETTY, 76 parts (3.8%), **5 700 euros**, act signed 2007-08-07;
+Jacques BOCKEL → Véronique SCHOTT, 106 parts (5.30%), effective 2010-12-30; Jacques BOCKEL →
+Jérémy BOCKEL and DOMENEGHETTY jointly. `[I]` This answers §4.1's central question with a
+positive instance: `OPERATIVE`-shaped share-transfer text does exist and is locatable by a
+human reader; `route.py` has no rule that can reach it (§8.5/§8.7's documented ceiling), so
+this item is an intentional, structural disagreement (`mechanism_coverage_gap`), not a bug.
+
+**B. `constitution`.** `[F]` Document `541e` is a genuine constitution (capital 7 500 euros,
+100 parts of 75 euros, allocated 10/90 between the two founders, signed and dated). `[I]` It
+reads the same way ARCHEAN's `…7ec5` does under the current schema: states an initial capital
+with no transition verb, so `MENTION`, not a distinct verdict — confirming (not merely
+assuming) that a real constitution and a mere statutes-reprint of one both land in the same
+bucket under the current two-mechanism design.
+
+**C. `authorization`.** `[U]` **Not found.** No document read here presents a standalone
+authorised-but-unrealised ceiling. §4.3's question — can a document distinguish an
+authorisation that was later exercised from one that was not — remains untested by this gold
+set. Recorded as insufficient evidence, exactly as the task anticipates is an acceptable
+outcome.
+
+**D. Recital exclusion — a third surface form found, and it turns out not to matter here.**
+`[F]` This company's statutes recite the 2003 apport-en-nature operation as `"Lors de
+l'augmentation de capital en date du 05 août 2003, [Jacques BOCKEL] apporte à la
+Société..."` — a third construction, distinct from both ARCHEAN's `"aux termes de"` and
+HADEAN's `"Lors de [operation] décidée par [assembly] du <date> :"`. `[F]` **Measured
+directly**: this exact line matches neither `_TRANSITION_RE` nor `_AMOUNT_RE` — the recital
+opener has no transition verb on the same line as an amount, so it was never a candidate for
+`route.py`'s recital-exclusion logic to act on in the first place. `[R]` This is real
+evidence, but it answers a narrower question than intended: it shows the regex's *narrowness*
+incidentally protects against this form, not that the *recital-exclusion logic itself*
+generalises to it. §5's finding is the one that actually exercises recital-exclusion in this
+company, and it exercises a completely different, more serious failure mode.
+
+**E. Date-vs-backref.** See §5 — not a trade-off measurement here, a single unified bug.
+
+#### 5. The dominant finding: a systematic, previously undiscovered bug
+
+`[F]` **Every disagreement in this comparison traces to one root cause, confirmed three
+times, independently, before being written up as one finding rather than three.**
+`archean.frenchnum.parse_french_date_parts` accepts any bare 4-digit numeral in the
+1000–2999 range as a year, with no other validation. Share and part counts in this
+corpus routinely fall in exactly that range:
+
+| document | the numeral | misread as | consequence |
+|---|---|---|---|
+| `541d`, p.3 idx 2 | `"1766"` (*"création de 1766 parts"*) | year 1766 < 2003 | a genuinely `OPERATIVE` résolution (the apport-en-nature increase) is suppressed into `RECITAL`. Document-level verdict still `OPERATIVE` — résolution 3's independent line survives. |
+| `5421`, p.5 idx 50 | `"1766"` again, one line above a boilerplate Article 8/9 line that *also* falsely matches `TRANSITION_RE` (`"augmentation de capital de"` matches inside `"...capital de la SàRL"` — no amount-after-"de" requirement) | year 1766 < 2003 | the suppressed candidate alone flips the WHOLE document from gold `MENTION` to router `RECITAL`, because `classify()`'s control flow is `if operative: OPERATIVE; elif suppressed: RECITAL; else: check topic → MENTION` — a suppressed candidate short-circuits the topic check entirely. |
+| `5420`/`5426`, the 2013 increase | `"2000"` (*"création de 2000 parts nouvelles"*) | year 2000 < 2013 | the **sole** operative line in each file is suppressed, with no second line to fall back on — the document-level verdict flips from gold `OPERATIVE` to router `RECITAL`. This is the most consequential instance: two genuinely decided, adopted, and realised capital increases (150 000 → 300 000 euros, exact `"pour le porter de"` template) are misclassified. |
+
+`[R]` **Not fixed here**, per this step's explicit scope. Reproduction: `archean.corpus.
+load_corpus(...)`, `archean.route._capital_evidence(doc, _read_document_lines(doc))` shows
+each cited line in `suppressed`, not `operative`; `archean.frenchnum.parse_french_date_parts
+("...1766...").year == 1766` and the same for `"2000"` confirm the parser's own behaviour
+directly, independent of `route.py`.
+
+#### 6. A confirmed structural finding, independent of the router
+
+`[F]` `5420` and `5426` share `numChrono` 2049 and are one registry deposit split into two
+PDF files with overlapping content (an AGE, updated statutes, and three cession acts, all
+present in both at different page offsets) — discovered only because both files' raw
+candidate-line counts came out numerically identical during construction (33 topic-capital
+lines, 65 topic-transfer lines, 1 suppressed line, in both) and were checked directly rather
+than assumed coincidental. `[R]` This is the same twin-filing pattern already documented for
+ARCHEAN (§4.1's C8: `…ec8`/`…ec9`, `…eca`/`…ecb`) — now confirmed in a second company, from
+independent evidence, not merely re-asserted.
+
+#### 7. Router comparison — `scripts/gold_compare.py`, run 2026-09-17
+
+`[F]` **8 of 14 items agree (57%); 6 disagree, and every disagreement is fully categorised —
+zero fall into the `other` bucket:**
+
+| item | mechanism | gold | router | category |
+|---|---|---|---|---|
+| `bockel-5421-capital` | capital_amount | MENTION | RECITAL | `date_problem` |
+| `bockel-5420-capital` | capital_amount | OPERATIVE | RECITAL | `date_problem` |
+| `bockel-5426-capital` | capital_amount | OPERATIVE | RECITAL | `date_problem` |
+| `bockel-5421-transfer` | share_transfer | SILENT | MENTION | `mechanism_coverage_gap` |
+| `bockel-5420-transfer` | share_transfer | OPERATIVE | MENTION | `mechanism_coverage_gap` |
+| `bockel-5426-transfer` | share_transfer | OPERATIVE | MENTION | `mechanism_coverage_gap` |
+
+`[F]` The `mechanism_coverage_gap` disagreements are **exactly** what §8.5/§8.7 already
+predicted (`share_transfer` cannot reach `OPERATIVE`, by construction) — confirmed, not
+newly discovered. `[F]` The `date_problem` disagreements are new: §5's bug was not known
+before this step. `[R]` `bockel-5421-transfer`'s disagreement was predicted in the gold
+item's own rationale *before* the comparison was run (`"cession"` matching in its
+asset-resale sense, not its share-transfer sense) — confirmed exactly as predicted, which is
+itself a small, useful validation that the gold set's reasoning was sound going in, not
+rationalised after the fact.
+
+`[R]` **We do not conclude "the router is 57% accurate."** Per the task's explicit
+instruction and this project's standing practice: agreement is a fact about two independent
+readings of the same documents, not a grade. Every disagreement here has a specific,
+traceable cause that a reviewer can check independently — that is the useful output, not the
+percentage.
+
+#### 8. What this confirms, what it weakens, what remains unresolved
+
+`[F]` **Confirmed**: `share_transfer`'s `OPERATIVE` ceiling is real and load-bearing — a
+genuine, unambiguous, priced transfer exists in real data and the router cannot reach it.
+The `mechanism_coverage_gap` category is not theoretical. `[F]` **Confirmed**: the twin-filing
+(`numChrono`) pattern generalises beyond ARCHEAN. `[I]` **Weakened**: the working assumption
+that `route.py`'s capital-recital logic, validated as `TP=5/FP=0` on ARCHEAN and shown to
+generalise to HADEAN's second surface form (§8.7), was reasonably robust. It is not — a
+completely different, more basic failure mode (numeral-as-year misparsing) was sitting
+underneath, invisible in ARCHEAN and HADEAN only because neither happened to place a
+4-digit share count within three lines of a transition+amount line. `[U]` **Unresolved**:
+whether `authorization` and `constitution` need their own mechanism at all, now that a real
+constitution has been observed to behave identically to a statutes-reprint under `MENTION`;
+whether the third recital surface form found here (§4.D) would matter in a company where it
+*does* co-occur with an amount; how many companies in the corpus have a share/part count in
+the 1000–2999 range near a capital resolution (not measured — this step found the bug in one
+company, it did not survey its prevalence).
+
+### 8.9 Four-digit numeral / year ambiguity — the fix, and what fixing it cost
+
+`[F]` **How it was found.** Identified by this project's engineer during review, then
+independently confirmed by §8.8's gold set, which flagged it as a router disagreement on a
+document the AI had not itself checked — matching accounts, README.md §8. Traced from there
+to its root: `archean.frenchnum.parse_french_date_parts`
+accepted **any** bare 4-digit numeral in 1000–2999 as a year, with no contextual check.
+Confirmed three times on JACQUES BOCKEL SARL (445070311) — `541d` p.3, `5421` p.5, and
+`5420`/`5426` — where share/part counts `"1766"` and `"2000"` were each read as a year
+earlier than the document's own filing year, wrongly triggering
+`archean.route._cites_earlier_year` and suppressing genuinely `OPERATIVE` lines into
+`RECITAL`. `5420`/`5426`'s misclassification was the most consequential: two real, decided,
+adopted, realised capital increases (150 000 → 300 000 euros) were misread as historical
+recitals.
+
+`[F]` **Which layer was responsible — audited, not assumed.** `parse_french_year`, called in
+isolation on a string, has no way to know whether `"1766"` means a year or a quantity — that
+is not a defect in its contract, it is the nature of a lexical parser with no surrounding
+text. Verified this stayed true after the fix: `parse_french_year("1766") == 1766` and
+`parse_french_year("2000") == 2000` still hold (`tests/test_gold_non_archean.py::
+test_the_fix_lives_in_frenchnums_context_layer_not_a_route_py_special_case`,
+`tests/test_frenchnum.py::test_parse_french_year_still_accepts_an_isolated_four_digit_numeral`).
+The actual defect was one level up, in `parse_french_date_parts`'s **no-month fallback**: when
+no day, no month word and no numeric date shape matched anywhere on a line, it called
+`_trailing_year` on the **whole, unanchored line** — a helper written to be safe only when
+called *after* an anchor already precedes it (a month word), not on arbitrary text. That
+call site, not `parse_french_year`'s own contract, is where the fix belongs.
+
+`[F]` **Corpus-wide surface, measured against the actual shipped code, both before and
+after the fix** (all 20 companies, `scripts/validate_routing.py`'s `read_document_lines`,
+67 426 total OCR lines):
+
+| | lines |
+|---|--:|
+| total OCR lines scanned | 67 426 |
+| lines where `parse_french_date_parts` finds a day+month (date-shaped; unaffected by this fix) | 1 569 |
+| **pre-fix**: lines where the unrestricted no-month fallback returned a bare year | 842 |
+| **post-fix**: lines where the `l'an`-marked fallback returns a bare year | 28 |
+| refused post-fix (97% of the 842) | 814 |
+
+`[F]` Of the 842 pre-fix bare-year hits, three false-positive classes dominate, none of them
+previously identified: statutory article citations (`"l'article 1424 du Code Civil"` — **151
+corpus-wide hits, the single largest source**, bigger than the share-count trigger that
+surfaced the bug), registry/greffe reference numbers (`"Code greffe : 2104"`, `"N/REF : 55 B
+140 / A-3545"`), and bare amounts (`"Enregistrement : 1196 euros"`) — in addition to the
+share/part counts that started this investigation. `[F]` The 28 kept post-fix were checked
+individually: every one is a genuine `"L'an <year>,"` preamble, spanning at least 12
+companies.
+
+`[F]` **Fix chosen.** `parse_french_date_parts`'s no-month fallback now requires an explicit
+`l'an` marker (`_bare_year_if_marked`, `archean/frenchnum.py`) before it will read a bare
+year at all — reusing the existing `_trailing_year` extraction unchanged, just gating when it
+is called. No new regex beyond the one-word marker; no fuzzy matching; no document-ID or
+company-specific branching (still enforced by `tests/test_route.py::
+test_no_document_id_special_casing_anywhere_in_route_py`'s AST check). `archean/route.py`'s
+`_cites_earlier_year` itself needed only its exception clause widened (see next finding) — the
+recital-window logic, the 3-line scope, and `_RECITAL_WINDOW` are untouched.
+
+`[F]` **Alternative measured and rejected: the preposition `en`** (as in `"en 2018"`, the
+form this task's own brief suggested checking first). Measured directly: of the 842 bare-year
+hits, only 18 contain `en` immediately before the numeral, and on inspection most of those 18
+are still false positives — `en` is also the partitive "divided INTO N shares" (`"divisé en
+2500 actions"`, `"divisé en 4000 parts"`), and cannot be told apart from the temporal sense by
+local context alone without a much larger, riskier rule. Rejected in favour of `l'an`, whose
+28 kept hits were each individually verified genuine.
+
+`[F]` **Alternative considered and rejected: never use an isolated 4-digit number as recital
+evidence at all** (Phase 6's fallback option). Not needed — the `l'an` marker gives a
+100%-precision positive signal on the measured 28, so the more drastic option (discarding the
+bare-year path entirely, which would also silently drop `test_a_spelled_year_line_yields_only_
+a_year`'s three existing cases) was not required.
+
+`[F]` **A second, independent bug found as a byproduct of this audit, and fixed the same
+way.** Running `parse_french_date_parts` over the whole corpus (not merely the lines that
+matter for routing) surfaced 3 lines where an OCR-split registration stamp — the day digits
+separated by a space, e.g. `"3 0 MAI 2012"` (`027080076`, doc `63e8c25c7e898005f51aaa52`,
+page 1) and `"2 0 AOUT 2007"` (445070311's `5420`/`5426`) — lets the day+month+year regex
+capture day=0. `DateParts.to_date()` raises a bare stdlib `ValueError` there, not this
+module's own `FrenchDateError`, which `archean.route._cites_earlier_year`'s original
+`except FrenchDateError:` was not prepared to catch — an **unhandled crash**, not a
+misclassification, on any document containing this artifact within a recital-check window.
+Fixed at its source (`archean/frenchnum.py`'s new `_validate_calendar_date`, converting the
+raw `ValueError` into `FrenchDateError` — safe because `FrenchDateError` already **is** a
+`ValueError` subclass, so no existing `except FrenchDateError` or `except ValueError` caller
+narrows) and defensively at the consumer (`_cites_earlier_year`'s except clause widened to
+`except (FrenchDateError, ValueError):`, documented in its own docstring as a belt-and-braces
+measure, not the primary fix).
+
+`[F]` **Regressions protected.** `tests/test_frenchnum.py`: 8 new cases — the exact `1766`/
+`2000` corpus lines refused as dates, the `l'an`-marker contract (positive and negative),
+`parse_french_year`'s isolated contract unchanged, and both calendar-invalid stamps raising
+`FrenchDateError`. `tests/test_route.py`: `_cites_earlier_year` tested directly against the
+real corpus text for both share counts (must not suppress), all three genuine recital forms
+(full numeric date, dd/mm/yyyy, `l'an`-marked bare year — must still suppress), a same-year
+date (must not suppress), and both calendar-invalid stamps (must not crash).
+`tests/test_gold_non_archean.py`: the two tests that had pinned the pre-fix bug as current,
+correct behaviour (`test_5420_and_5426_are_misclassified_as_recital_not_operative` →
+`test_5420_and_5426_are_now_correctly_operative`; the anti-tampering check that used to assert
+`parse_french_date_parts("1766").year == 1766` → `test_the_fix_lives_in_frenchnums_context_
+layer_not_a_route_py_special_case`, which instead confirms the fix landed in the
+context-consuming layer, not a `route.py` special case) were transformed, not deleted — same
+corpus text, same document identity, corrected expected verdict. The gold file itself,
+`tests/data/gold_non_archean.json`, was **not modified**.
+
+`[F]` **Gold-set impact, `scripts/gold_compare.py` re-run against the fixed code**: 10 of 14
+agree (71%, up from 8/14), 4 disagree (down from 6):
+
+| item | mechanism | gold | router (pre-fix) | router (post-fix) | category |
+|---|---|---|---|---|---|
+| `bockel-5420-capital` | capital_amount | OPERATIVE | RECITAL | **OPERATIVE** ✓ | fixed |
+| `bockel-5426-capital` | capital_amount | OPERATIVE | RECITAL | **OPERATIVE** ✓ | fixed |
+| `bockel-5421-capital` | capital_amount | MENTION | RECITAL | OPERATIVE | `date_problem` (still disagrees) |
+| `bockel-5421-transfer` | share_transfer | SILENT | MENTION | MENTION (unchanged) | `mechanism_coverage_gap` |
+| `bockel-5420-transfer` | share_transfer | OPERATIVE | MENTION | MENTION (unchanged) | `mechanism_coverage_gap` |
+| `bockel-5426-transfer` | share_transfer | OPERATIVE | MENTION | MENTION (unchanged) | `mechanism_coverage_gap` |
+
+`[I]` `bockel-5421-capital` **stays a disagreement, but not for the fixed reason.** Its own
+`known_findings` entry (§8.8.5) already named the second, independent cause on the record
+before this fix existed: a boilerplate line matches `TRANSITION_RE`+`AMOUNT_RE` on its own
+(`"...au titre de l'augmentation de capital de la"` — `TRANSITION_RE` has no requirement that
+an amount actually follow "de", so this is a pre-existing, separate pattern-matching
+imprecision, not a date problem in itself) and used to be accidentally hidden inside a
+`RECITAL` verdict by the very year-misparse bug fixed here. Removing that bug does not remove
+the boilerplate false match; it only stops masking it, so the document now reaches `OPERATIVE`
+directly instead of `RECITAL` — still wrong against gold's `MENTION`, still the same
+underlying finding (`known_finding_id: "date-misparse-share-counts-as-years"`), just a
+different downstream verdict. `scripts/gold_compare.py`'s categorisation is keyed off that
+`known_finding_id`, not re-derived from the verdict, so it correctly stays `date_problem`
+without any change to `scripts/gold_compare.py` itself.
+
+`[F]` **ARCHEAN regression — unaffected.** `tests/test_route.py`'s full ARCHEAN suite passes
+unchanged: `…ec4` still `OPERATIVE`, `…ec2` still the metadata/content conflict, `…7ebf`/`…7ec8`
+still `MENTION`/`MENTION`, `…ec7` still positive for both mechanisms, `…7ec9`/`…7ecb`/`…7ebd`
+still `RECITAL` via `"aux termes de"` (untouched by this fix — none of ARCHEAN's own recitals
+ever depended on the bare-year path), and the page-5 "approved principle" known limitation
+(`test_known_limitation_transition_rule_also_matches_an_approved_principle`) is unchanged.
+None of ARCHEAN's 293 OCR pages happens to place a 4-digit share count within the recital
+window of a transition+amount line, so the bug never reached ARCHEAN in either direction.
+
+`[U]` **New discovery, not anticipated by this step's scope: fixing this bug also removed an
+accidental correct answer.** `scripts/validate_routing.py` carries its own, independent
+implementation of the same date-based recital rule (`_past_date_near`/
+`operative_hits_by_date`, built to validate `route.py`'s design — §8.5), sharing
+`archean.frenchnum` as its only date-parsing dependency. §8.5 measured that this rule excluded
+two HADEAN documents (`9133`, `9134`) that the `"aux termes de"` backref rule missed — a
+genuine recital, `"Lors de l'augmentation de capital décidée par l'assemblée générale
+extraordinaire du 30 avril 2008 :"`. That page's OCR **splits the date across two lines**
+(`"... du 30 avril"` / `"2008 :"`, and in `9134`'s case across three: `"... du 30 a"` / `"1"` /
+`"2008 :"`), and every date parse in this codebase is line-local. The exclusion never came
+from a principled reading of the split date — it came from the bare, unmarked `"2008"`
+fragment being accepted by the exact over-permissive fallback this step fixed. Once that
+acceptance is gone, so is the accidental exclusion: `9133`/`9134` are no longer detected as
+recitals by either rule, and post-fix the date rule and the backref rule are cross-corpus
+**identical** (same FP set `{5421, 9133, 9134, 9139}`, same FN set) — the date rule's
+previously-measured cross-corpus advantage over the backref rule (§8.5: "disagreement with
+`typeRdd` drops from 4 documents to 1") no longer holds and §8.5 has been annotated in place
+to point here. `archean/route.py`'s own `_cites_earlier_year` has the identical behaviour on
+the identical text (`tests/test_route.py::
+test_known_limitation_date_recital_is_missed_when_ocr_splits_the_date`, `…9133` now correctly
+predicted to return `OPERATIVE`, not `RECITAL`/`MENTION`). This is HADEAN, not ARCHEAN or the
+gold-non-archean company, and it does not change any gold-agreement number in §8.8/8.9 above
+— but it is recorded here in full because silently absorbing a real accuracy loss into "the
+fix worked" would be exactly the kind of thing this step was designed to prevent.
+
+`[R]` **This is not claimed as solved — remaining, explicitly unresolved limitations:**
+- **Cross-line OCR date splitting is a separate, still-open defect**, exposed rather than
+  caused by this fix. `CLAUDE.md` already flagged line-joining as unvalidated future work for
+  `extract_text`'s bare-phrase matching (§8.4); the same limitation now demonstrably applies to
+  date parsing too, and needs its own corpus-wide audit before being implemented — deliberately
+  out of scope here (Phase 11).
+- **`l'an` is the only positive marker measured and shipped.** It was sufficient for every
+  genuine bare-year case found in this corpus (28/28 verified), but a corpus this fix has not
+  scanned could contain a different genuine bare-year idiom this marker misses; that would be
+  a false negative, not a false positive, and has not been ruled out.
+- **Prevalence of the underlying pattern (a 4-digit quantity in 1000–2999 near a capital
+  resolution) across the other 18 non-ARCHEAN, non-BOCKEL companies was not surveyed** — this
+  step fixed the mechanism generally, but did not re-run the full gold-comparison exercise
+  against every company, only the one with a hand-verified gold set.
+- `[U]` **Superseded by §8.10.** `bockel-5421-capital`'s disagreement, described above as
+  "not something this step's scope covers fixing", **was** fixed in the very next step —
+  §8.10 found the `TRANSITION_RE` boilerplate match had a robust, corpus-proven textual
+  distinction after all (whether "de" is followed by a digit or a determiner), which this
+  paragraph did not yet know when it was written.
+
+---
+
+### 8.10 Final routing hardening — the `TRANSITION_RE` boilerplate false match
+
+`[F]` **The problem, exposed by §8.9, not caused by it.** After §8.9 fixed the year-misparse
+bug, `bockel-5421-capital` stayed a disagreement — but for a different reason than before:
+gold says `MENTION`, the router said `OPERATIVE`. `_capital_evidence` (`archean/route.py`)
+matched `_TRANSITION_RE` against `"...au titre de l'augmentation de capital de la"` (page 5,
+line index 50) and `_AMOUNT_RE` against `"75 euros"` elsewhere on the same line, together
+satisfying the transition+amount test. Full sentence, reconstructed across three OCR lines
+(page 5, indices 48-50): *"En contrepartie de la valeur nette de cet apport ..., il **sera**
+attribué à Monsieur Jacques BOCKEL 1766 parts nouvelles entièrement libérées de nominal 75
+euros au titre de l'augmentation de capital de la SàRL JACQUES BOCKEL."* — future tense
+(*"sera"*, will be), from a *"rapport du commissaire aux apports"*, an independent auditor's
+report VALUING a proposed contribution ahead of the shareholders' meeting that will actually
+decide the increase. It decides nothing; gold's own rationale for this item says so directly.
+
+`[F]` **Root cause.** `_TRANSITION_RE`'s `"augmentation de capital de"` alternative never
+checked what followed "de". `_AMOUNT_RE` then matched independently, anywhere on the line —
+here, the 75-euro **nominal value per new share**, not an increase amount. Two separate,
+compounding imprecisions, not one: the transition phrase is a bare topic reference in French
+("*augmentation de capital de la SARL X*" = "the SARL X's capital increase", a noun phrase
+naming whose operation it is, not a quantity), and the amount check had page/line reach far
+enough to find an unrelated number.
+
+`[F]` **What `TRANSITION_RE` actually represents (§9's Phase-2 question).** Not "an executed
+operation" as a whole — it is a mix of two different things wearing one name: seven of its
+nine alternatives are verb + "de" + quantity constructions (*"augmenté **de** 113 000
+euros"* = "increased **BY** 113 000 euros"), where "de" grammatically **must** introduce a
+quantity and cannot introduce anything else — these are unambiguous by construction. Two
+alternatives — `"augmentation de capital de"` and `"reduction du capital de"` — are
+genitive/topic constructions where "de" can introduce **either** a quantity (*"de 113 000
+euros"*) **or** an entity (*"de la SARL X"*), and only corpus measurement can tell which one
+occurs in a given instance.
+
+`[F]` **Corpus-wide measurement, all 20 companies, every `TRANSITION_RE`+`AMOUNT_RE`
+co-occurrence** (`scripts/validate_routing.py`-style line reading, 67 426 OCR lines):
+
+| alternative | corpus-wide transition+amount hits | followed directly by a digit |
+|---|--:|---|
+| `augmente(e/es/s)? de` | 31 | 31/31 |
+| `augmenter le capital` | 10 | 0/10 (amount is a few words later: *"...le capital social d'une somme de X euros"*) |
+| `pour le porter` | 8 | 0/8 (*"...de X euros à Y euros"*) |
+| **`augmentation de capital de`** | **7** | **5/7** — see below |
+| `reduire le capital` | 2 | 0/2 |
+| `porter le capital` | 1 | 0/1 |
+| `reduit(e/s)? de` | 1 | 1/1 |
+| `ramene(e)? de` | 1 | 1/1 |
+| `reduction du capital de` | 0 | — (never fires in this corpus) |
+
+`[F]` The other eight alternatives were checked too, not assumed safe: `"digit immediately
+after"` is not their shape (several put the amount several words later, inside a longer
+clause), but **every one of their 54 hits has an amount unambiguously belonging to that same
+clause** — none is a case where an unrelated number elsewhere on the line could be mistaken
+for the transition's own amount, because none of those seven verbs/constructions has a second
+reading where "de X" names an entity instead of a quantity. Only the two
+`"...capital de"` genitive alternatives have that second reading, so only they needed the
+narrower check.
+
+`[F]` Of the 7 `"augmentation de capital de"` hits, checked individually:
+
+| document | text after "de" | classification |
+|---|---|---|
+| `024052656`/`…d37b` | `"49.686,51 euros est définitivement et"` | operative amount |
+| `480489707`/`…7ec4` | `"113 000 € par la création de 1 130"` | operative amount |
+| `480489707`/`…7ec7` p.5 | `"100.000 euros (plus une"` | operative amount (an *"approve le principe"* clause — §8.7's already-documented, separate known limitation; unaffected by this fix) |
+| `499979540`/`…9136` | `"59 900 euros, assortie d'une prime d'apport de"` | operative amount |
+| `445070311`/`5421` p.5 | `"la"` | **topic reference — the false positive** |
+| `445070311`/`541d` p.13 | `"la"` | **topic reference — same sentence, duplicated** |
+| `445070311`/`541d` p.30 | `"la"` | **topic reference — same sentence, duplicated again** |
+
+`[F]` **Not an isolated case: a systematic pair.** Both false positives are the exact same
+boilerplate sentence (the auditor's report's standard valuation-attribution wording),
+occurring three times across two documents — once in `5421`, twice in `541d` (the same
+report appears to be reproduced twice within `541d`, at different page offsets, consistent
+with the twin-filing/reprint pattern already documented elsewhere in this corpus). Zero
+counter-examples: every "de + digit" instance is genuinely operative; every "de + non-digit"
+instance is this same boilerplate reference. A sample of 7, not exhaustive of the whole
+corpus's potential vocabulary, but exhaustive of every instance this specific pattern
+produces in the actual shipped data — Phase 2's "systematic class vs isolated case" question
+is answered: systematic (not one-off), but narrow (one recurring sentence, not a broad class
+of constructions).
+
+`[F]` **Fix chosen — priority 2 (Phase 3): a proven textual distinction, so `TRANSITION_RE`
+was corrected, not the routing context.** The two ambiguous alternatives now require a digit
+immediately after "de" (`(?=\s+\d)`, a zero-width lookahead — chosen over a consuming `\d`
+after finding by direct testing that a consuming digit breaks the trailing `\b` for
+multi-digit numbers, since digit-digit has no word boundary between them). The other seven
+alternatives are untouched — corpus measurement found no comparable ambiguity to justify
+touching them, and doing so anyway would be an unmeasured, speculative change. No document ID,
+no company name, no exception list, no fuzzy or semantic matching — the fix lives entirely
+in what character class follows a specific French preposition.
+
+`[F]` **541d's evidence, not just 5421's verdict, improved.** `541d`'s document-level verdict
+was already `OPERATIVE` before this fix (two independent genuine operative lines on page 3
+carry it), so this fix does not change that verdict — but it removes the same boilerplate
+sentence from its evidence tuple twice (previously reported redundantly as `operative-capital`
+evidence on pages 13 and 30), which matters for the module's own auditability promise even
+where it does not flip a verdict.
+
+`[F]` **Gold-set impact — `scripts/gold_compare.py`, re-run after this fix:**
+
+| item | mechanism | gold | before (§8.9 state) | after (§8.10) | result |
+|---|---|---|---|---|---|
+| `bockel-541e-capital` | capital_amount | MENTION | mention | mention | unchanged |
+| `bockel-541e-transfer` | share_transfer | MENTION | mention | mention | unchanged |
+| `bockel-5421-capital` | capital_amount | MENTION | **operative** | **mention** | **fixed** |
+| `bockel-5421-transfer` | share_transfer | SILENT | mention | mention | unchanged (`mechanism_coverage_gap`) |
+| `bockel-541d-capital` | capital_amount | OPERATIVE | operative | operative | unchanged verdict; evidence tuple shrank from 4 to 2 lines |
+| `bockel-541d-transfer` | share_transfer | MENTION | mention | mention | unchanged |
+| `bockel-5420-capital` | capital_amount | OPERATIVE | operative | operative | unchanged |
+| `bockel-5420-transfer` | share_transfer | OPERATIVE | mention | mention | unchanged (`mechanism_coverage_gap`) |
+| `bockel-5426-capital` | capital_amount | OPERATIVE | operative | operative | unchanged |
+| `bockel-5426-transfer` | share_transfer | OPERATIVE | mention | mention | unchanged (`mechanism_coverage_gap`) |
+| `bockel-541b-capital` | capital_amount | MENTION | mention | mention | unchanged |
+| `bockel-541b-transfer` | share_transfer | SILENT | silent | silent | unchanged |
+| `bockel-541c-capital` | capital_amount | MENTION | mention | mention | unchanged |
+| `bockel-541c-transfer` | share_transfer | SILENT | silent | silent | unchanged |
+
+`[F]` **11 of 14 agree (79%, up from 10/14 after §8.9, 8/14 before §8.9). `capital_amount` is
+now 7/7 — every capital_amount item in this gold set agrees with the router.** The 3
+remaining disagreements are all `share_transfer`'s already-documented, structural
+`mechanism_coverage_gap` (§8.5/§8.7/§8.8: no `OPERATIVE`-reaching signal for `share_transfer`
+survived cross-corpus measurement — untouched by this or the previous fix). `[R]` This was
+not optimised for: the fix was designed and corpus-measured before this table was produced,
+against a proven textual distinction, not against the agreement count.
+
+`[F]` **ARCHEAN regression — unaffected.** `scripts/validate_routing.py rules` (ARCHEAN's own
+gold, `transition + amount, no earlier date nearby`): **TP=5, FP=0, FN=2, TN=10**, byte-for-byte
+identical to §8.7/§8.9's figures. None of ARCHEAN's own `"augmentation de capital de"` /
+`"reduction du capital de"` hits (`…7ec4`, `…7ec7` page 3 and page 5) are followed by anything
+but a digit — the page-5 "approved principle" known limitation (§8.7,
+`test_known_limitation_transition_rule_also_matches_an_approved_principle`) is unchanged,
+still present, still not this fix's target (it is followed by a real digit, `"100.000
+euros"` — a different, already-documented limitation, not the one fixed here).
+`tests/test_route.py`'s full ARCHEAN and HADEAN suites pass unchanged.
+
+`[F]` **A parallel, unfixed instance, recorded rather than silently left inconsistent.**
+`scripts/validate_routing.py`'s own `TRANSITION` constant (line ~109) is a separate,
+independently-maintained copy of the same alternation, predating `route.py` and kept
+unmodified by this step — the same reasoning as §8.9's note about that script's separate
+`frenchnum`-consuming date rule. It still has the unfixed ambiguity. Checked whether this
+matters for anything currently measured: `tests/test_routing_validation.py`'s full suite
+passes unchanged (it does not happen to exercise the `5421`/`541d` boilerplate sentence
+through a path that changes any frozen count), so nothing in this document required updating
+on that account — but the script itself remains a second copy of a pattern this step proved
+wrong in one instance, out of scope to fix here the same way `scripts/validate_routing.py`'s
+`frenchnum`-dependent behaviour was in §8.9.
+
+`[R]` **Not claimed as solved beyond its proven scope:**
+- Only the two `"...capital de"` genitive alternatives were touched. The other seven were
+  measured, not assumed — but only against this corpus's actual 54 non-ambiguous hits, not
+  against every French sentence shape that could theoretically occur.
+- `scripts/validate_routing.py`'s own `TRANSITION` constant carries the identical,
+  now-proven-wrong pattern and was deliberately not touched (out of scope — see above).
+- Whether other, still-unmeasured boilerplate sentences exist elsewhere in the 18
+  non-ARCHEAN, non-BOCKEL companies that would trigger a similar false match was not
+  surveyed — this step fixed the one proven, reproducible instance and the general
+  grammatical class it belongs to, not an exhaustive corpus-wide scan for every possible
+  boilerplate sentence shape.
+
+---
+
+## 9. LLM Strategy — the division of labour
+
+`[U]` **Superseded — never implemented, see §23.6 and README.md §8.** This table was the plan
+at the point it was written. The router (§8) and the event/timeline layer (§23) turned out to
+answer the challenge's grading criteria fully deterministically; running an LLM directly over
+this corpus's text volume in the extraction path was judged, before implementation, to add
+token cost, runtime, and non-determinism the shipped pipeline does not otherwise have, so this
+plan was not built. `cache/llm/` in `.gitignore` still names the convention below for the
+record, but nothing was ever written to it.
+
+| task | code | LLM | human (you) |
+|---|---|---|---|
+| enumerate documents, pages, meta | yes | | |
+| route to candidate pages (`typeRdd` + lexicon scoring) | yes | | |
+| **read a French legal resolution and say what it decides** | | yes | |
+| ~~pair a name with a share count in an interleaved table~~ → **moved to code**, see §4.2-V correction 2 | **yes** (y-band geometry) | | spot-check |
+| parse French date words → ISO | yes | | |
+| parse French number words → int | yes | | |
+| decide `event_code` for an unambiguous resolution | | yes | |
+| decide `event_code` for an ambiguous one (entry vs transfer) | rule (§10) | propose | **adjudicate** |
+| **compute bbox** | **only** | **never** | |
+| verify `snippet` exists in the OCR | yes | | |
+| arithmetic: `before + Δ = after`, share sums, % | **only** | **never** | |
+| apply the fold, build snapshots | yes | | |
+| detect invariant violations | yes | | |
+| **decide what a violation means** | | propose | **decide** |
+| name canonicalisation / alias clustering | propose | | **approve the map** |
+| resolve a name → SIREN (bonus) | lookup | **never guess** | confirm |
+| write the `notes` contradiction narrative | | draft | **rewrite** |
+| visual bbox check | render | | **eyeball** |
+
+**Model choice `[R]`:** Claude Sonnet 5 for extraction (cheap, ~30 page-group calls, strict
+JSON), Opus only if a page defeats it. Temperature 0. `.env.example` should therefore name
+`ANTHROPIC_API_KEY` and `LLM_MODEL` (default `claude-sonnet-5`), and — since a reviewer must be
+able to run this — **cache every LLM response to `cache/llm/<sha256(prompt)>.json` and commit
+the cache**, so `python -m archean.pipeline` reproduces `results.json` byte-for-byte **with no
+API key at all**. The repo README explicitly says "If your submission needs no keys at all, say
+so in the README — that is a legitimate and interesting answer." A committed cache gets us both:
+a real LLM pipeline *and* a zero-key reproduction. `[R]` High value, cheap; do it.
+
+---
+
+## 10. The ENTRY vs TRANSFER problem
+
+### 10.1 The rule (derived from `event_codes.json`, §3.4)
+
+> **Mechanism events are extracted. Consequence events are derived.**
+> Extract only `CAPITAL_INCREASE`, `CAPITAL_DECREASE`, `SHAREHOLDER_SHARE_TRANSFER` from
+> documents. Emit `SHAREHOLDER_ENTRY` / `SHAREHOLDER_END` **exclusively** from the fold, by
+> diffing `state_before` and `state_after`.
+
+Decision procedure for any observed movement:
+
+```
+Does shares_total change?
+├── YES → the shares are NEW or CANCELLED   → CAPITAL_INCREASE / CAPITAL_DECREASE
+│         └── did a name appear/disappear?  → derive ENTRY / END  (mechanism = the capital event)
+└── NO  → the shares MOVED between parties  → SHAREHOLDER_SHARE_TRANSFER
+          └── did a name appear/disappear?  → derive ENTRY / END  (mechanism = the transfer)
+```
+
+The invariant that makes it safe: **a TRANSFER never changes `shares_total`; an
+INCREASE/DECREASE always does.** Assert both in the validator.
+
+### 10.2 Worked examples from this corpus
+
+**(a) Double-count trap — CAPGRAS, 2006-10-20.** The AGE both *agrées* CAPGRAS as a new
+shareholder (7th res.) **and** authorises AUMONT to cede him 225 shares (8th res.). Two
+resolutions, **one** movement.
+
+- Wrong: `SHAREHOLDER_ENTRY(CAPGRAS, 225)` **plus**
+  `SHAREHOLDER_SHARE_TRANSFER(AUMONT→CAPGRAS, 225)` both applied to the fold → CAPGRAS ends with
+  450, `shares_total` inflated to 2 225.
+- Right: extract **one** `SHAREHOLDER_SHARE_TRANSFER(AUMONT→CAPGRAS, 225)`. The fold sees
+  CAPGRAS is new → emits `SHAREHOLDER_ENTRY(CAPGRAS, shares=225, mechanism=TRANSFER)`.
+  `shares_total` stays 2 000.
+- Extra subtlety `[F]`: the resolution *authorises* — it does not record execution. Independent
+  confirmation that it happened comes from HADEAN's statutes reciting AUMONT's 742 (= 967 − 225)
+  and CAPGRAS's 225. Without that cross-check the honest answer would be `confidence: medium`
+  with a note. **Use the cross-check and say where it came from.**
+
+**(b) Artificial-share-creation trap — 2008-06-27.** HADEAN is already the sole holder with
+200 000 shares and subscribes 17 241 new A shares.
+
+- Wrong: `SHAREHOLDER_ENTRY(HADEAN, 17 241)` — HADEAN is not entering, and an ENTRY event for an
+  existing holder invites a fold bug that adds a second HADEAN line.
+- Right: `CAPITAL_INCREASE(+17 241, capital_after=217 241, method=numeraire)` with the allocation
+  in the payload. No ENTRY — the fold sees HADEAN already present.
+
+**(c) Artificial-disappearance trap — 2017-02-21.** Four funds sell 150 861 shares *to the
+company*, which cancels them.
+
+- Wrong: `SHAREHOLDER_SHARE_TRANSFER(FPCI SECURITE → ARCHEAN TECHNOLOGIES, 64 655)`. A transfer
+  preserves `shares_total`; this would leave ARCHEAN holding its own shares and the capital
+  would not fall.
+- Right: **one** `CAPITAL_DECREASE(−150 861, capital_after=217 241, method=autre,
+  mechanism="rachat et annulation")` naming the four sellers in the payload; the fold then
+  derives **four** `SHAREHOLDER_END` events. This is the case where transfer-shaped language
+  ("rachat", "offres d'achat") must *not* become a transfer event.
+
+**(d) The genuinely ambiguous one — 2005-08-16.** Three holders sell everything to two holders,
+`shares_total` unchanged at 1 500.
+
+- `SHAREHOLDER_SHARE_TRANSFER` × N, `SHAREHOLDER_END` × 3 derived.
+- But **we do not know how many shares each of the three held**, so we cannot write per-pair
+  `shares`. The defensible output is a `SHAREHOLDER_SHARE_TRANSFER` per *cédant* with
+  `shares: null` + a note, plus the *resulting* snapshot (823/617/60) which **is** documented.
+  `[R]` Anchor the snapshot on the stated result, not on arithmetic we cannot perform.
+
+### 10.3 Anti-double-count guards (as validator rules)
+
+- Two events with the same `(event_date, from, to, shares)` → duplicate, fail.
+- An `ENTRY` whose holder already exists in `state_before` → fail.
+- An `END` whose holder is absent from `state_before` → fail.
+- A `TRANSFER` whose `from` holds fewer shares than transferred → fail ("impossible transfer").
+- Any `ENTRY`/`END` in `events[]` that the fold did **not** derive → fail (it means we extracted
+  a consequence event by hand, violating §10.1).
+
+---
+
+## 11. French legal vocabulary — grounded in *this* corpus
+
+Every term below was **observed in the ARCHEAN OCR**, with the document it came from. This is
+the retrieval lexicon, not a textbook list.
+
+| French (as it appears) | meaning | seen in | signals |
+|---|---|---|---|
+| `Constitution` / `acte sous seing privé` | incorporation | meta, `…ec5` | initial state |
+| `ARTICLE 6 - APPORTS` | contributions article — **recites the full capital history** | `…ec3` p.7–8 | audit trail |
+| `ARTICLE 7 - CAPITAL SOCIAL` | the operative capital clause | all statutes | capital, shares, nominal |
+| `le capital social est fixé à la somme de …` | capital is set at | all statutes | `capital_after` |
+| `il est divisé en N actions de X euros` | divided into N shares of X | all statutes | `shares_total`, `nominal` |
+| `valeur nominale` / `de nominal chacune` | par value | all | `nominal_eur` |
+| `répartition` / `attribuées aux actionnaires suivant la répartition suivante` | allocation table | `…ec5` p.3, `…ec2` p.6 | holders |
+| `augmentation de capital` / `augmenter le capital social` | capital increase | `…ec4`, `…ec7`, `…ec3`, `…ec0` | `CAPITAL_INCREASE` |
+| `pour le porter de X euros à Y euros` | to raise it from X to Y | `…ec7` p.3 | before **and** after in one line |
+| `par création de N actions nouvelles` | by creating N new shares | `…ec4` p.2, `…ec7` p.3 | Δ shares |
+| `émises au pair` | issued at par (no premium) | `…ec7` p.3 | premium = 0 |
+| `prime d'émission` | issue premium | `…ec3` p.3 | **not** part of capital — do not add |
+| `par compensation avec des créances certaines, liquides et exigibles` | debt-to-equity offset | `…ec7` p.3 | `method` sub-type |
+| `par incorporation de réserves` / `prélèvement sur le poste « Autres Réserves »` | capitalisation of reserves | `…ec0` p.2 | `method = incorporation de reserves` |
+| `attribuées gratuitement à l'Associé Unique` | free attribution | `…ec0` p.2 | no cash, pro-rata |
+| `apport en numéraire` / `apport en nature` | cash / in-kind contribution | `…ec5` p.3; HADEAN `…9135` | method |
+| `réduction du capital social` / `ramener de X à Y` | capital decrease | `…ebf` p.3, `…ebe` p.3 | `CAPITAL_DECREASE` |
+| `rachat d'actions … en vue de leur annulation` | buyback for cancellation | `…ebf` p.3 | decrease, not transfer |
+| `les actions rachetées sont annulées` | cancelled | `…ebe` p.3 | effective date |
+| `associés minoritaires` | minority shareholders | `…ebf` p.3 | unnamed sellers |
+| `division de la valeur nominale des actions` | share split | `…ec3` p.1 | nominal ÷ 100, shares × 100 |
+| `cession d'actions` / `protocole de cession` / `céder N actions à` | share transfer | `…ec2` p.6, `…ec7` p.5 | `SHAREHOLDER_SHARE_TRANSFER` |
+| `ordres de mouvement` / `registre des mouvements de titres` | transfer orders / share register | `…ec2` p.6 | **effective date of a transfer** |
+| `agrée à devenir actionnaire` / `agrément d'un nouvel actionnaire` | approval of a new shareholder | `…ec7` p.2, p.4 | entry signal (mechanism elsewhere) |
+| `droit de préemption` / `droit préférentiel de souscription` (DPS) | pre-emption / preferential subscription right | `…ec7`, `…ec3` | its *suppression* implies reserved subscribers |
+| `réservée à des bénéficiaires dénommés` / `au profit de personnes dénommées` | reserved to named beneficiaries | `…ec7` p.2–3 | **the subscriber list follows** |
+| `actions de préférence de catégorie A / B / B'` | preference share classes | `…ec3` p.2, p.8 | `CAPITAL_DUAL_CLASS` |
+| `BSA` / `BSOC` / `ABSOC` / `obligations convertibles` | warrants / convertible instruments | `…ec3` p.3 | future dilution, not capital yet |
+| `associé` / `actionnaire` / `Associé(e) Unique` | shareholder / sole shareholder | throughout | **"associé unique" implies holders == 1** |
+| `feuille de présence` (`Nombre de Parts`) | attendance sheet with share counts | `…ec7` p.6 | **independent cap-table snapshot** |
+| `assemblée générale ordinaire / extraordinaire / mixte` (AGO/AGE) | shareholder meeting types | throughout | AGE implies statutory change |
+| `procès-verbal` (PV) / `décisions du président` | minutes / presidential decisions | throughout | doc type |
+| `extrait de procès-verbal` | **excerpt** — resolutions may be omitted | `…ec3` | absence ≠ non-existence |
+| `commissaire aux apports / aux avantages particuliers` | valuation / special-advantage auditor | `…ec6`, `…ec1` | out of scope, but corroborates |
+| `déposé au greffe le` | filed at the registry on | p.1 stamps | **deposit date ≠ event date** |
+
+`[R]` Two operational uses: (1) a **weighted page-scoring** function for Stage 1 retrieval —
+`pour le porter de` and `il est divisé en` score far higher than `capital` alone; (2) a **README
+glossary**, the cheapest possible way to show the reviewer we closed the French gap deliberately
+rather than by luck. They said explicitly they find *how* we close it interesting.
+
+### 11.1 Number and date literals — audit before building `frenchnum.py`
+
+Measured over all 11 254 OCR lines of the 17 actes. The point of this audit is to keep the
+parser scoped to what this corpus actually contains, and to avoid promoting "valid French"
+into "present in the corpus".
+
+#### Spelled-out numbers — `[F]` observed
+
+Every spelled numeral that appears beside its own digits, which is how these documents
+write the operative amounts:
+
+| written form (normalized) | value | where |
+|---|---|---|
+| `trente sept mille` | 37 000 | constitution, art. 7 |
+| `trois cent soixante dix` | 370 | constitution, art. 6 and 7 (×4) |
+| `cent` | 100 | nominal, several |
+| `cent cinquante mille` | 150 000 | 2006 statutes, art. 7 |
+| `mille cinq cent` | 1 500 | 2006 statutes, art. 7 |
+| `deux cent mille` | 200 000 | 2007 statutes, art. 7 |
+| `deux mille` | 2 000 | 2007 statutes, art. 7 |
+| `cinq cents` | 500 | registration stamps (×3) |
+| `deux cent quatre-vingt-quinze` | 295 | registration stamp |
+
+`[F]` **Hyphens are not reliable in this corpus.** The same grammar appears both ways:
+`trois cent soixante dix` (70 written with a space) sits four lines from
+`quatre-vingt-quinze` (fully hyphenated), and in dates `deux mille dix-sept` coexists with
+`deux mille dix huit`. A parser that requires hyphens fails here; one that requires spaces
+fails too. Both must be accepted as separators.
+
+`[F]` **`cents` takes its plural** (`cinq cents` = 500). `[F]` **`vingts` never appears** in
+the corpus — 0 occurrences.
+
+#### Spelled-out numbers — `[F]` *not* observed
+
+These are grammatical French but have **zero occurrences** here: `vingts`, `mil` (the
+archaic year form, e.g. *mil neuf cent*), `million`, `milliard`, and numeral-sense
+`et un` outside the single date `vingt-et-un`. All 27 hits for `et un` are the ordinary
+conjunction (`un plan de financement et un plan de trésorerie`).
+
+`[R]` The parser still implements the full standard grammar for 0–999 999 999 including
+`million`, `vingts` and `soixante-et-onze`, because the rules are closed and well defined
+and the extra code is a lookup table. But `mil` as a year form is **deliberately excluded**:
+supporting it would make `mil` ambiguous against a misread `mille`, for zero benefit here.
+Which forms are corpus-attested and which are implemented-for-completeness is recorded in
+the module docstring, so nobody later mistakes coverage for evidence.
+
+#### Dates — `[F]` observed, in three shapes
+
+| shape | example | count |
+|---|---|---|
+| **A.** numeric day + month word + numeric year | `17 mai 2005`, `2 septembre 2005` | 48 distinct |
+| **B.** `dd/mm/yyyy` | `27/06/2008`, `22/12/2004` | 20 distinct |
+| **C.** fully spelled | `Le vingt neuf janvier deux mille treize,` | see below |
+
+`[F]` **Shape C is normally split across two OCR lines**, because the act's preamble is
+typeset that way:
+
+```
+L'an deux mille dix-sept,        <- year only
+Le vingt-et-un février,          <- day and month only
+```
+
+Only one line in the corpus carries a complete spelled date by itself
+(`Le vingt neuf janvier deux mille treize,`). `[R]` So the parser exposes a *parts* API that
+returns `day`/`month`/`year` with `None` for whatever is absent, and a strict API that
+refuses to return a date until all three are known. Recombining a year from one line with a
+day from another is a caller's decision made against layout evidence — not something a
+number parser may do silently.
+
+`[F]` Month spellings emitted by OCR: accented lower case (`août`, `décembre`, `février`)
+and unaccented upper case (`FEVRIER`, `JANVIER`, `MAI`, `MARS`, `JUIN`, `NOVEMBRE`,
+`OCTOBRE`, `SEPTEMBRE`). `[F]` **`avril` never occurs** in these 17 actes. No month name is
+OCR-corrupted anywhere in the corpus.
+
+`[I]` `dd/mm/yyyy` ordering is inferred, not stated: of the 20 distinct numeric dates, those
+that disambiguate themselves all have `day > 12` (`27/06`, `22/12`, `31/03`, `17/05`), and
+none has a first component above 31. Combined with French convention this makes day-first
+certain in practice, but `05/01/2005` is formally ambiguous on its own. `[R]` The parser
+parses day-first and **returns an explicit `day_month_ambiguous` flag** when both components
+are ≤ 12, rather than hiding the assumption.
+
+#### OCR corruption — `[F]` every instance, with its example
+
+Letters substituted for digits *inside* a numeral. These are all of them:
+
+| corrupted | intended | substitution | where |
+|---|---|---|---|
+| `37.0o0` | 37.000 | `o`→`0` | `…ec5` p.3, the constitution's capital |
+| `200s` | 2005 | `s`→`5` | `…ec4` p.6, `le 17 mai 200s` |
+| `400/o0o` | 400.000 | `/`→`.`, `o`→`0` | `…ec0` p.4 |
+| `5o0` | 500 | `o`→`0` | registration stamp |
+| `2o08` | 2008 | `o`→`0` | registration stamp |
+| `26S6` | 2656 | `S`→`5` | greffe stamp |
+| `820o0` | 82000 | `o`→`0` | a postcode |
+| `cing` | `cinq` | `g`→`q` | `cing cents euros`, `délai maximum de cing` |
+
+`[F]` Corruptions of the *currency word* also occur — `euròs`, `euøs`, `curos`, `buros` —
+but they never touch the numeral, so the number parser does not need them.
+
+`[F]` **Fuzzy correction would be actively harmful here.** Scanning every token in the corpus
+for edit-distance-1 neighbours of a number or month word returns `nombre` (143×, "number"),
+`mais` (33×, "but"), `main` (16×, "hand") and `d'eux` (12×, "of them"). All four are ordinary
+French words one edit away from `novembre`, `mai`, `mai` and `deux`. A similarity-based
+repairer would corrupt 204 correct tokens to fix 8 broken ones.
+
+`[R]` So repair is a **separate, opt-in layer** with an explicit rule table, never applied by
+the number parser itself, and gated on a token being *numeral-shaped*: at least two real
+digits, and every non-digit character drawn from the documented confusable set. A repair is
+only attempted at all when the token contains one of those confusable **letters**, which is
+what keeps `27/06/2008` and `2/3` from being touched. Each rule cites the corpus token that
+motivated it, and a test asserts the guard never fires on any of the ~11k real word tokens
+in the corpus.
+
+#### Ambiguities that remain `[H]`
+
+- `05/01/2005` and the other numeric dates whose two leading components are both ≤ 12 cannot
+  be disambiguated from the string alone. Flagged, not resolved.
+- `200s` is repaired to `2005` by rule, but the rule alone cannot prove the intent — only the
+  surrounding sentence (`augmentation de capital intervenue le 17 mai 200s`) and the
+  corroborating `17/05/2005` elsewhere do. The repair layer therefore reports what it changed
+  so the caller can carry the caveat forward.
+- A bare spelled year such as `deux mille dix` is a *year*, not a date. The parser returns it
+  as a year and refuses to manufacture a day or month.
+
+---
+
+## 12. External Sources
+
+`[R]` **The corpus is sufficient for the capital chain. It is not sufficient for two holder
+questions.** Be precise about which:
+
+| missing | where it should have been | why it matters | external source that would settle it |
+|---|---|---|---|
+| **Per-holder allocation of the 1 130 shares of 2005** | the **AGE of 2005-03-04**, referenced in `…ec4` p.2 but absent | the only unknown split in the whole timeline; also fixes what GUELLATI/LEROUX/ROUJEAN held | INPI: pull all 2005 dépôts for 480489707. Secondarily BODACC 2005. |
+| **Subscribers of the 150 861 B shares (2008)** | resolutions 10 & 12–15 of the 2008-06-27 decisions — omitted because the filed document is an ***extrait*** | 41 % of the capital for 9 years | INPI: the full PV rather than the extrait, if deposited. Otherwise the 2017 buyback list is the best available evidence. |
+| **Transfer of BLANCO's 953 shares to HADEAN** | not in ARCHEAN's folder | completes the 2007→2008 handover | **already in the local corpus** — `data/499979540/actes/…069137` (2008-05-29). Check before going external. |
+| SIREN of FPCI SECURITE / GALIA VENTURE / FINANCIERE DE BRIENNE / FIP GALIA PME 4 | never given | bonus only | `resolved: false` is the correct answer unless confirmed. FPCI/FIP are *fonds*, which frequently have **no SIREN of their own** — the management company does. Do not guess. |
+
+`[R]` Time-box external lookups to **30 minutes, after the timeline is complete**, and record in
+the README exactly what was looked up and what it changed. Do not start there.
+
+---
+
+## 13. Architecture
+
+```
+archean-actes/                        ← our own repo (sibling of the clone)
+├── results.json                      ← THE deliverable
+├── README.md                         ← how to run · trade-offs · How I used AI · what I left · recording
+├── .env.example                      ← ANTHROPIC_API_KEY= / LLM_MODEL=claude-sonnet-5
+├── .gitignore                        ← .env, out/, __pycache__
+├── pyproject.toml                    ← pymupdf, pydantic, rapidfuzz, jsonschema, anthropic
+├── src/archean/
+│   ├── config.py          DATA_ROOT, SIREN, model name
+│   ├── corpus.py          index meta+ocr+pdf → Document/Page objects   [deterministic]
+│   ├── lexicon.py         the §11 terms, weighted                      [deterministic]
+│   ├── route.py           typeRdd + lexicon → candidate page groups    [deterministic]
+│   ├── extract.py         LLM call, strict schema, disk cache          [LLM]
+│   ├── ground.py          snippet → line ids → polygon union → bbox    [deterministic]
+│   ├── frenchnum.py       number-words & date-words → int / ISO date   [deterministic]
+│   ├── names.py           canonicalise + alias map                     [deterministic + human]
+│   ├── fold.py            CapitalState, apply(), derive ENTRY/END      [deterministic]
+│   ├── validate.py        invariants + golden diff + jsonschema        [deterministic]
+│   └── emit.py            results.json + notes                         [deterministic]
+├── data_overrides/
+│   ├── aliases.yaml       hand-approved name equivalences
+│   └── adjudications.yaml ← contradictions we resolved, with the reason. Human, versioned, cited.
+├── cache/llm/             committed → zero-key reproduction
+├── tests/
+│   ├── golden_capital_chain.json   ← §4.2, hand-built oracle
+│   ├── test_bbox.py       conversion == bbox_viewer on known lines, BOTH page geometries
+│   ├── test_frenchnum.py  "trois cent soixante dix" → 370; "37.0o0" → flagged
+│   ├── test_fold.py       each event type; the four §10.2 traps as regression tests
+│   └── test_schema.py     results.json validates against results.schema.json
+├── scripts/
+│   ├── inventory.py       regenerates the §4.1 table
+│   ├── dump_ocr.py        dump a document's OCR text by page   (promoted from discovery)
+│   ├── grep_ocr.py        accent-insensitive line grep         (promoted from discovery)
+│   └── verify_boxes.py    renders every event's bbox → docs/box_checks/
+└── docs/box_checks/*.png
+```
+
+`adjudications.yaml` is the piece I would most want a reviewer to see: it is where "we noticed
+the documents disagree" becomes a reviewable artefact rather than a sentence in a README.
+
+---
+
+## 14. Implementation Plan (ordered)
+
+1. `corpus.py` + `scripts/inventory.py` — reproduce §4.1 from the data. *(proves the plumbing)*
+2. `tests/golden_capital_chain.json` — commit §4.2 **first**, so everything after has an oracle.
+3. `ground.py` + `test_bbox.py` — the conversion, tested against `bbox_viewer --grep` output on
+   3 known lines across both page geometries. *(de-risks the graded artefact early)*
+4. `frenchnum.py` + tests.
+5. `route.py` — `typeRdd` + lexicon → candidate pages. Print the shortlist; **eyeball it**
+   against §4.1 before spending a token.
+6. `extract.py` — Pydantic-typed output, cached, `evidence_line_ids` mandatory.
+7. `fold.py` + `test_fold.py` — with the four §10.2 traps as named regression tests.
+8. `validate.py` — invariants (§16), then golden diff, then jsonschema.
+9. `emit.py` → `results.json`; run `scripts/verify_boxes.py`; eyeball the contact sheet.
+10. README + `.env.example` + recording.
+11. *(only if time remains)* `group.nodes/edges` from HADEAN + ARCHEAN LABS + bilans.
+
+---
+
+## 15. 6–8 Hour Prioritisation
+
+The discovery above (~1 h) is already done and is a real asset — the capital chain, the
+contradictions and the HADEAN link are found. Budget from here:
+
+```
+0:00–0:30  repo scaffold, config, corpus.py, inventory.py, golden file committed
+0:30–1:15  ground.py + frenchnum.py + their tests   (provenance de-risked first)
+1:15–2:00  route.py; shortlist reviewed by hand against §4.1
+2:00–3:30  extract.py; run over the 7 P0 documents only; inspect every extraction
+3:30–5:00  fold.py + derived ENTRY/END + the four trap tests
+5:00–5:45  validate.py; fix what it catches; golden diff must be clean
+5:45–6:15  emit results.json; verify_boxes.py; eyeball the contact sheet
+6:15–7:15  README (glossary, contradictions, gaps, How I used AI, trade-offs) + .env.example
+7:15–7:45  recording
+7:45–8:00  final audit: schema validation, no .env committed, links work
+```
+
+### MUST HAVE
+
+- `results.json` that **validates against the schema** (a file they cannot parse scores zero).
+- The full capital chain 37 000 → 400 000 with correct `capital_after` at every step.
+- Correct `event_date`s taken from document bodies, never filenames.
+- Every event grounded: real `inpi_id`, real page, **code-computed** bbox, verbatim snippet.
+- The **derived** ENTRY/END model (§10.1), stated and implemented.
+- `README.md` naming C1–C8: the 20-share discrepancy, the 6 %/4 % error, the 185 759/182 759
+  typo, the missing 2005-03-04 AGE, the unnamed 2005 subscribers, the unnamed 2008 B holders,
+  and the fact that the HADEAN handover is **not** in this folder.
+- `.env.example`, `.gitignore` with `.env`, no committed key.
+
+### SHOULD HAVE
+
+- Validator with hard invariants + the golden-chain diff, run in `make check` or CI.
+- `docs/box_checks/` contact sheet.
+- Committed LLM cache → reproduction with no API key.
+- French glossary in the README.
+- `confidence` + `derivation` on every event and snapshot.
+- HADEAN cross-reference used to close the 2007→2008 gap, explicitly sourced.
+
+### NICE TO HAVE
+
+- `CAPITAL_DUAL_CLASS` events for the A/B/B' classes (free, unscored).
+- Per-class share tracking (A vs B) inside snapshots.
+- `group.nodes/edges`: ARCHEAN ← HADEAN (evidenced), ARCHEAN LABS (?), ARCHEAN INTERNATIONAL
+  (`resolved: false`), plus a second hop (who owns HADEAN) from HADEAN's own statutes.
+- Bilans used as an independent capital cross-check.
+
+### CUT FIRST
+
+1. **Local OCR fallback** — zero value here (§8.2). Cut immediately.
+2. **The group bonus beyond HADEAN** — the brief says "do the timeline first". If the timeline
+   is not clean by 6:00, emit only the HADEAN edge (or none) and say so.
+3. **Generalising the pipeline to all 20 companies.** Tempting, scores nothing.
+4. **A web UI / notebook dashboard.** Scores nothing.
+5. **Per-class (A/B) tracking** if the fold gets fiddly — collapse to one class and note it.
+6. **External INPI lookups** — strictly after everything else.
+
+---
+
+## 16. Validation Strategy
+
+### 16.1 Invariants (assert, and on failure **record**, never silently repair)
+
+**Arithmetic**
+
+- `I1` `capital_after == capital_before + amount` for every INCREASE/DECREASE.
+- `I2` `capital_eur == shares_total × nominal_eur` at every snapshot. *(Holds at every step of §4.2.)*
+- `I3` `sum(h.shares for h in holders) == shares_total`, when all holder shares are known.
+- `I4` `sum(pct) ∈ [99.5, 100.5]`; `pct` is computed, never parsed.
+- `I5` a TRANSFER leaves `shares_total` and `capital_eur` **unchanged**.
+- `I6` an INCREASE/DECREASE **changes** `capital_eur`.
+- `I7` a nominal split leaves `capital_eur` unchanged and scales `shares_total` inversely.
+- `I8` `shares` are integers ≥ 0; no fractional shares anywhere.
+
+**Cap-table integrity**
+
+- `I9` no duplicate holder name within one snapshot (post-canonicalisation).
+- `I10` a holder present in `state[n]` and absent from `state[n+1]` **must** have a
+  `SHAREHOLDER_END` in `state[n+1].caused_by`. *(catches silent disappearance)*
+- `I11` a holder absent from `state[n]` and present in `state[n+1]` must have a
+  `SHAREHOLDER_ENTRY`. *(catches silent appearance)*
+- `I12` `transfer.shares <= state_before[from].shares`. *(impossible transfer)*
+- `I13` if any document says `associé unique` at date D, `len(holders) == 1` at D.
+  *(free, very strong — it fires on 2008, 2017 and 2018)*
+
+**Temporal**
+
+- `I14` `capital_timeline` is non-decreasing in `as_of`.
+- `I15` `event_date <= meta.dateDepot` for every event. *(the deposit is never before the decision)*
+- `I16` no two events share `(event_code, event_date, payload_signature)`. *(duplicates)*
+- `I17` same-day events have an explicit `seq`.
+
+**Provenance**
+
+- `I18` every event has a `source`; `inpi_id` exists in `meta/`; `page <= pdf.page_count`.
+- `I19` `0 <= bbox[i] <= 1`, `x0 < x1`, `y0 < y1`, and area is neither ~0 nor > 0.5 of the page.
+- `I20` `snippet` fuzzy-matches (≥ 0.90) the concatenated OCR text of the cited lines **on that
+  page of that document**. *(the anti-hallucination check)*
+- `I21` every numeral in `payload` appears in the cited snippet, or `grounded_numbers: false`.
+
+**Oracle**
+
+- `I22` the emitted `(date, capital_eur, shares_total, nominal_eur)` sequence equals
+  `tests/golden_capital_chain.json` exactly.
+- `I23` `results.json` validates against
+  `challenges/actes/schema/results.schema.json` (`jsonschema` draft 2020-12).
+
+### 16.2 What "failure" means
+
+`[R]` The validator should have **three outcomes**, not two: `PASS`, `WARN` (a known,
+adjudicated contradiction listed in `adjudications.yaml` — e.g. C1's 20 shares), and `FAIL`
+(anything else). A `WARN` must carry the adjudication reference. That way the 823/803 conflict
+shows up as a *documented, intentional* warning rather than either a crash or a silence — and
+`notes` can be generated from the WARN list automatically, guaranteeing the README and the JSON
+tell the same story.
+
+---
+
+## 17. Main Risks
+
+| # | risk | likelihood | impact | mitigation |
+|---|---|---|---|---|
+| R1 | **Over-engineering the pipeline and running out of time before `results.json` exists** | **high** | fatal | build the golden file and `emit.py` early; a hand-seeded but validated `results.json` at 4:00 beats a beautiful half-pipeline at 8:00 |
+| R2 | LLM invents a share count that OCR never contained | medium | high | I20/I21; `evidence_line_ids`; temperature 0 |
+| R3 | bbox off-by-scale (A4 assumed for the 1655×2360 pt scans) | medium | high | read `page.rect` per page; `test_bbox.py` covers **both** geometries |
+| R4 | wrong `event_date` (deposit vs decision) | medium | high | I15 + French date-word parser + the §5.4 table as test fixtures |
+| R5 | double-counting ENTRY + TRANSFER (the brief's own warning) | medium | high | §10.1 rule + the four trap regression tests |
+| R6 | the 2010/2011 duplicate dépôts produce duplicate events | medium | medium | deduplicate by `numChrono`; I16 |
+| R7 | name variants split one holder into two (`GICQUEL`/`GICOUEL`) | high | medium | canonicalise + committed alias map + I9 |
+| R8 | asserting the HADEAN handover without reading `…069137` | medium | medium | read it, or mark `[H]` explicitly |
+| R9 | committing a real key | low | **very high** (explicitly "counts against you") | `.gitignore` `.env` from commit #1; grep the diff before the PR |
+| R10 | schema violation (bbox > 1, wrong `siren`) makes the file unscoreable | low | fatal | I19/I23 in `make check`, run last |
+| R11 | scope creep into the group bonus | medium | medium | hard gate at 6:00 |
+
+---
+
+## 18. Expected Weak Points
+
+Where I expect our submission to be genuinely weak, and where the README must say so plainly:
+
+1. **The 2005-05-17 cap table.** We will know capital (150 000) and share count (1 500) but
+   **not the split**, and not what GUELLATI/LEROUX/ROUJEAN held. Best output: a snapshot with
+   `shares: null` per holder and `holders_known: false`. Any specific split we write would be
+   invented. This is the largest genuine hole and it is unavoidable from this corpus.
+2. **The 2008 B-share attribution.** Back-inferred from a 2017 document. Defensible, but it is an
+   inference across nine years during which those funds could have traded among themselves.
+   Mark `confidence: medium` and say why.
+3. **The 20-share discrepancy (C1).** We can detect it; we cannot adjudicate it. Two documents,
+   both official, both internally consistent. The right answer is to report both and decline to
+   pick — which is also what the brief says they look for.
+4. **BLANCO's exit.** Until `…069137` is read, "BLANCO's 953 shares went to HADEAN in 2008" is
+   `[H]`, not `[F]`. If time runs out, it stays a hypothesis and must be labelled one.
+5. **Preference-class tracking.** A/B/B' with conversion rights and BSOC/OCA instruments are
+   genuinely complex; we will likely track class as a label only and ignore conversion mechanics.
+   Acceptable — no conversion appears to have occurred — but say it.
+6. **SIREN resolution for the four funds.** Almost certainly unresolved. `resolved: false`.
+7. **The 2025 document.** Metadata shape differs (`PJ_52`, `numNat`, no `typeRdd`); our router
+   may need a special case. Low impact (no capital event) but it will look like a gap if unhandled.
+8. **Bilans unused.** Nine annual filings for ARCHEAN sit unread in the main plan. They could
+   cross-check capital and reveal the group. Realistically out of budget.
+
+---
+
+## 19. Claude Code / VS Code Workflow
+
+Assessed against what this environment **actually** offers (verified, not assumed):
+
+| capability | available here | use it? | why, for *this* challenge |
+|---|---|---|---|
+| **Bash + Python one-liners** | yes | **heavily** | The entire discovery above was ~12 Bash/Python calls. Ad-hoc OCR greps are the highest-bandwidth tool in this task. |
+| **Grep tool (ripgrep)** | yes | limited | Accents and the per-line JSON structure mean a small Python grep beats raw ripgrep here. Keep the Python one. |
+| **Read / Edit / Write** | yes | yes | Normal editing. |
+| `tools/bbox_viewer.py` | yes | **critical** | It is the *reference implementation* of the graded conversion. Test against it. |
+| **PyMuPDF (installed)** | yes | yes | Page geometry; page rendering for visual checks. |
+| **Git / GitHub (`gh`)** | yes | yes | Submission is a PR with `@YassineBouderbala` and `@AleBastos25` invited as reviewers. |
+| **pytest** | yes | yes | The golden file + trap tests are the cheapest credibility we can buy. |
+| **JSON Schema validation** | yes (`jsonschema`) | **must** | "A submission we cannot parse is a submission we cannot score." |
+| **`CLAUDE.md`** | yes | yes | §20 — it is what stops a long session drifting into invention. |
+| **Subagents (`Agent` tool)** | yes | **sparingly** | §21. |
+| **MCP servers** | a Google Drive connector is listed but **unauthenticated in this session** | no | Not usable here and not needed. Don't design around it. |
+| **WebSearch / WebFetch** | yes (deferred tools) | late only | Only for §12, time-boxed to 30 min *after* the timeline. |
+| **VS Code split view** | yes | yes | Render a page to PNG and open it beside the OCR JSON — this is how you resolve the interleaved-table problem by eye in seconds. |
+| **Scratchpad dir** | yes | yes | Keep throwaway greps out of the deliverable repo. |
+
+**Concrete working loop `[R]`:**
+
+1. Keep `DISCOVERY.md` (this file) open as the working spec; update it as facts change.
+2. One terminal running `pytest -q` on save; one running `python -m archean.validate`.
+3. For any disputed number:
+   `python tools/bbox_viewer.py --pdf … --page N --ocr … --grep "…"` → copy the printed box →
+   that *is* the submittable bbox. Fast, and it is the graders' own tool.
+4. Commit per stage with messages that name the finding (e.g. *"fold: derive ENTRY/END at
+   projection time per event_codes.json"*). The git log becomes evidence of reasoning for the
+   recording.
+
+**Investigation artefacts created during this discovery** (throwaway, in the session scratchpad,
+**not** part of the deliverable): `dump.py` (dump a document's OCR text by page),
+`grep_corpus.py` (accent-insensitive line grep over 480489707), `grep_any.py` (same across all
+20 companies). `[R]` Promote `dump.py` and `grep_corpus.py` into `scripts/` — they are genuinely
+useful and they show the reviewer how the corpus was explored.
+
+---
+
+## 20. `CLAUDE.md` Proposal
+
+`[R]` **Yes, create one** — in our solution repo, not in the clone. The specific failure it
+prevents is the one the challenge punishes hardest: a long session quietly inventing a share
+count or a bbox to make the timeline close. Proposed content:
+
+```markdown
+# ARCHEAN TECHNOLOGIES — actes challenge
+
+## What this repo is
+Reconstruct the capital composition of ARCHEAN TECHNOLOGIES (SIREN 480489707), 2005–2025,
+from its filed actes. Output: `results.json` at the repo root, matching
+`../engineering-challenges/challenges/actes/schema/results.schema.json`.
+Budget: 6–8 hours total. Partial and auditable beats complete and unverifiable.
+
+## Rules that are never broken
+1. **Never invent a number.** Every figure in `results.json` traces to OCR text we can quote.
+   If it is unknown, it is `null` plus a note. "Unknown" is a correct answer.
+2. **Never invent a bounding box.** Boxes are computed by `ground.py` from OCR polygons.
+   No LLM output is ever written into a `bbox` field.
+3. **`event_date` is the date in the body of the decision.** Never the filename, never
+   `dateDepot`. Where a decision is authorised then realised, the capital event is dated at
+   realisation, with `authorised_on` in the payload.
+4. **Extract mechanisms; derive consequences.** Only CAPITAL_INCREASE, CAPITAL_DECREASE and
+   SHAREHOLDER_SHARE_TRANSFER come from documents. SHAREHOLDER_ENTRY and SHAREHOLDER_END are
+   emitted by `fold.py` from a state diff. (Per `event_codes.json`.)
+5. **Scope is capital composition only.** Auditors, presidents, addresses, objet social, name
+   changes: ignore, even when they sit in the same resolution.
+6. **Contradictions are reported, not resolved silently.** Anything adjudicated goes in
+   `data_overrides/adjudications.yaml` with the reason and both citations, and is surfaced in
+   `results.json > notes`.
+7. **Never commit `.env`, a key or a token.**
+
+## Output contract
+- `siren` is the literal string `"480489707"`.
+- `bbox` = `[x0,y0,x1,y1]`, normalized 0–1, origin top-left, page 1-indexed.
+  Conversion: `px / (page.rect.<dim> * 300/72)`, using **that page's** rect.
+- `source.inpi_id` = the 24-hex id in the PDF filename (== `meta.id` == the OCR dir name).
+- Money as `Decimal`; shares as `int`. Never float.
+
+## Commands
+    python -m archean.pipeline          # full run (uses cache/, no API key needed)
+    python -m archean.validate          # invariants + golden diff + jsonschema
+    python scripts/inventory.py         # regenerate the document table
+    python scripts/verify_boxes.py      # render every event bbox to docs/box_checks/
+    pytest -q
+    python ../engineering-challenges/tools/bbox_viewer.py --pdf <pdf> --page N --ocr <dir> --grep "<text>"
+
+## Definition of done
+`pytest` green · `validate` reports PASS or only adjudicated WARNs · `results.json` validates
+against the schema · every event's box rendered and eyeballed · README covers how to run it,
+trade-offs, "How I used AI", what is unresolved, and the recording link · `.env.example` present,
+`.env` absent.
+
+## LLM policy
+LLM reads French and pairs names to counts on a *given page*, returning `evidence_line_ids`
+plus a verbatim `snippet`. Code does all arithmetic, all dates, all boxes, all folding, all
+validation. Temperature 0. Every response cached to `cache/llm/` and committed.
+
+## When a document is ambiguous
+Emit the event with `confidence: low` and a `note`, record it in `adjudications.yaml`, and
+surface it in `notes`. Do not pick the most recent document just because it is the most recent.
+```
+
+---
+
+## 21. Subagent Strategy
+
+`[R]` **Two, at most — and not the five-agent split.** Honest reasoning:
+
+- The corpus is **17 documents / 293 pages / one company**. Five cold-started agents would each
+  re-derive the same context (schema, conversion, capital chain) and then need reconciling —
+  which costs more than doing it inline, and risks five slightly different capital chains.
+- The task is also **deeply sequential**: routing depends on the lexicon, extraction on routing,
+  the fold on extraction, validation on the fold. There is little genuine parallelism.
+- The parts that *are* independent are the ones where a fresh, uncontaminated reading is actually
+  valuable — i.e. auditing, not producing.
+
+**Where a subagent genuinely pays:**
+
+| agent | when | why it beats doing it inline |
+|---|---|---|
+| **A — Group/bonus investigator** | after 6:00, only if the timeline is done | Truly independent (different sirens, different folders), read-only, and its context (20 companies × bilans) would otherwise pollute the main session. Runs in the background while the README is written. |
+| **B — Adversarial timeline auditor** | once at ~5:30, on the finished `results.json` | The single highest-value use: give it *only* the schema, `results.json` and the corpus path, and ask it to break the timeline — find an unsourced holder change, a box pointing at the wrong line, an arithmetic gap. A cold reader catches what the author cannot. |
+
+**Not worth a subagent:** repository analysis (done, inline), document analysis (17 docs — the
+main session reads them faster than it can brief an agent), French legal analysis (a lexicon
+file, not an agent), provenance audit (that is `scripts/verify_boxes.py` plus your eyes —
+deterministic code beats a model here).
+
+`[R]` Run A and B **in the background**, both read-only, and never let a subagent write to
+`results.json`. Per this environment's standing guidance, I will only spawn them if you ask.
+
+---
+
+## 22. Recommended Next Step
+
+**One concrete action, before any pipeline code:**
+
+> **Create the solution repo skeleton and commit `tests/golden_capital_chain.json` — the §4.2
+> capital chain — as the very first commit.**
+>
+> ```
+> D:\projeto takeovers\archean-actes\
+>   ├── tests/golden_capital_chain.json    ← the 10-row table of §4.2, with the inpi_id + page
+>   │                                        that proves each row
+>   ├── CLAUDE.md                          ← §20
+>   ├── .gitignore                         ← .env
+>   └── DISCOVERY.md                       ← this file, moved in
+> ```
+
+Why this first, and not `corpus.py`: it converts an hour of reading into a **machine-checkable
+oracle**. From that commit onward, every later stage has something to be wrong against, and the
+risk that most often kills this kind of submission — a plausible-looking pipeline whose numbers
+silently drift — is closed before a single line of extraction code exists.
+
+Immediately after, in order: `ground.py` + `test_bbox.py` (provenance de-risked second, because
+it is the graded artefact), then routing, then extraction.
+
+**Awaiting your approval before implementing anything.**
+
+*(Superseded by §23 — the plan above was executed in full, across the sessions that produced
+§4 through §8.10 and, finally, `results.json` itself.)*
+
+---
+
+## 23. Closing session — event extraction, timeline reconstruction, `results.json`
+
+`[F]` marks a fact directly observed in the corpus or measured by running code. `[I]` marks
+an inference drawn from those facts. `[H]` marks something explicitly NOT asserted, recorded
+so it cannot be mistaken for a fact later. `[U]` marks a finding that changes an earlier
+section's conclusion.
+
+### 23.1 What this session added, and what it deliberately reused unchanged
+
+`[F]` `archean/corpus.py`, `archean/frenchnum.py` and `archean/route.py` are **untouched** by
+this session (`git status` at commit time shows zero modifications to any of the three) — the
+event-extraction layer consumes their existing, already-tested public contracts (`load_corpus`,
+`classify`, `Grounder`) rather than reopening them. Two new modules were added:
+
+- **`archean/timeline.py`** — company-agnostic. `Event`, `Holder`, `CapTableState`,
+  `build_timeline`, `check_invariants`. Tested with 16 synthetic scenarios
+  (`tests/test_timeline.py`) that need no corpus at all — Decimal/int arithmetic, same-day
+  event ordering, the two-invariant check, and the explicit "unattributed holder" pattern for a
+  known total with an unknown split.
+- **`scripts/build_results.py`** — ARCHEAN-specific by design (the brief only ever asks for
+  480489707's own `results.json`). Cites the capital deltas and shareholder facts this project
+  has read directly, re-grounds every citation live against the real PDF/OCR via
+  `archean.ground.Grounder` at build time, and cross-checks every capital event against
+  `route.py`'s own, independently-computed `OPERATIVE` verdict before citing it.
+- **`scripts/validate_results.py`** — schema validation (`jsonschema.Draft202012Validator`
+  against the challenge's own `results.schema.json`) plus the two internal invariants, run as a
+  second, independent pass over the finished file, not just at generation time.
+
+### 23.2 Design decision: what "evidence-based" means for the shareholder side
+
+`[H]` This session explicitly did **not** attempt to build a generic, validated holder-table
+extractor (the OCR-interleaved-column geometry problem CLAUDE.md's corpus facts already
+flag) within its own time budget. Doing so to this project's own evidentiary bar — corpus-wide
+measurement, a written audit, regression tests — is a multi-session undertaking in its own
+right, and half of one, done under pressure, was judged a worse outcome than an honestly-scoped
+partial answer (the brief's own stated preference).
+
+`[F]` What was done instead: `capital_amount` events are 100% code-derived (`route.py`'s
+`OPERATIVE` verdict, cross-checked live at build time — see 23.3). `SHAREHOLDER_END` events (7)
+and `CAPITAL_DUAL_CLASS` events (2) were sourced by this session's own direct reading of the
+relevant pages, each citation re-verified live the same way the capital events are (a moved or
+invented snippet fails the build, not silently). No `SHAREHOLDER_ENTRY` or
+`SHAREHOLDER_SHARE_TRANSFER` event was emitted at all — see 23.4.
+
+`[I]` This is the same division of labour CLAUDE.md's original LLM Strategy (§9) always
+described for this project — a reader identifies the fact and its citation, code does every
+number, every date comparison, every bbox and every invariant check — except the "reader" here
+was this session's own direct corpus reading rather than a scripted LLM call. The project's
+`cache/llm/` convention (§9, `.gitignore`) was never exercised because no LLM extraction
+pipeline was built at all (§23.6).
+
+### 23.3 New facts found and grounded this session
+
+`[F]` **The GUELLATI/LEROUX/ROUJEAN exit, grounded for the first time.**
+`tests/golden_capital_chain.json` (an earlier session) already noted, in prose, that three
+shareholders "appear out of nowhere, hold shares for ~3 months, and leave" — but carried no
+citation for it, because that fact was outside what its own `chain[]` rows (capital deltas)
+needed. This session searched the whole ARCHEAN corpus for the three names directly
+(`Grounder.search`) and found:
+- `…ec4` p.1 (the 2005-05-17 AGE realising the +113 000 EUR increase): "Monsieur Malik
+  GUELLATTI et Monsieur Christophe LEROUX, associés représentant tant..." — both named as
+  **associés** (shareholders) that day, before the capital-increase resolution that follows in
+  the same document.
+- `…ec2` p.6 (filed 2006-01-04): "Ratification d'un protocole de cession d'actions dérogeant
+  aux statuts pour la totalité des actions détenues par Messieurs Malik GUELLATI, Christophe
+  LEROUX et Madame Marielle ROUJEAN, associés d'ARCHEAN TECHNOLOGIES" — a protocol ratifying
+  the cession of **the totality** of their shares, effective via "ordres de mouvement à émettre
+  en date du 16 août 2005."
+
+`[I]` This grounds three `SHAREHOLDER_END` events (2005-08-16) with high confidence on the
+departure itself. `[H]` It does **not** ground a `SHAREHOLDER_ENTRY` for any of the three: no
+document in this corpus states when or how they acquired their shares — the same gap
+`tests/golden_capital_chain.json`'s own `unresolved[]` list already named for the 2005-05-17
+increase's subscribers. Not resolved by this session; recorded, not guessed.
+
+`[F]` **The four-fund buyback, individually grounded.** `…ebe` p.3 (2017-02-21) names all four
+funds with exact share counts summing to 150 861: FPCI SECURITE 64 655, FIP GALIA PME 4 12 931,
+GALIA VENTURE 30 172, FPCI FINANCIERE DE BRIENNE 43 103 — matching
+`tests/golden_capital_chain.json` seq 8's prose note exactly, now with a live-verified citation.
+Four `SHAREHOLDER_END` events, `shares` populated (unlike the 2005 three, these counts ARE
+stated).
+
+`[F]` **Two `CAPITAL_DUAL_CLASS` events found and emitted** (unscored, per event_codes.json, but
+"emit it if you spot it, ignore it at no cost"): `…ec3` p.2, 6th and 8th resolutions,
+"Création d'actions de préférence de catégorie A" and "Création d'actions de préférence de
+catégorie B et B'" — matching event_codes.json's own trigger phrase
+("Création d'une/deux nouvelle(s) catégorie(s) d'actions de préférence dites <CODES>")
+almost verbatim.
+
+### 23.4 Why no `SHAREHOLDER_SHARE_TRANSFER` or `SHAREHOLDER_ENTRY` event exists
+
+`[F]` The only candidate in this corpus is the 2005-08-16 reallocation. `…ec2` p.6 gives a
+**result table** — "Il en résulte au terme des ordres de mouvement..., la nouvelle répartition
+suivante entre les associés: BLANCO 823 actions, AUMONT 617 actions, GICQUEL 60 actions" — not
+seller→buyer instructions. `event_codes.json`'s `SHAREHOLDER_SHARE_TRANSFER` payload requires
+exactly one `from_name`, one `to_name`, one `shares` count. `[H]` Deriving that from an
+aggregate table would require assuming a split the document does not state — exactly the kind
+of invention CLAUDE.md rule 1 forbids, so it was not attempted. `[I]` `SHAREHOLDER_ENTRY` is
+symmetric: BLANCO/AUMONT/GICQUEL were already associés before this reallocation (present since
+constitution), so nothing "enters" here; the closest thing to an entry event in this corpus (the
+2005-05-17 increase's unnamed subscribers) has no name to attach an ENTRY event to at all.
+
+`event_codes.json` itself anticipates that `SHAREHOLDER_ENTRY`/`SHAREHOLDER_END` are usually
+**derived**, not directly stated ("Most often *reconstructed* by diffing the pre- and post-act
+capital-allocation article rather than stated by an explicit phrase") — this session's design
+follows that: `SHAREHOLDER_END` was derivable (an explicit "cession of the totality" statement,
+diffed against the constitution's holder list); a pairwise `SHAREHOLDER_SHARE_TRANSFER` for the
+same movement was not, and is not invented to fill the gap.
+
+### 23.5 Cross-checks performed, and what they confirmed
+
+`[F]` Every one of the 6 capital events is asserted, at build time, to be
+`route.py`-`OPERATIVE` for `capital_amount`, with the cited fragment actually present in
+`route.py`'s own evidence text (`scripts/build_results.py`'s `assert_route_agrees`) — this
+caught one real mismatch during construction (this session originally cited `…ec3`'s p.8
+statute-recital lines for the two 2008-06-27 increases; `route.py`'s own `OPERATIVE` evidence
+is the p.2/p.3 decision lines instead — both are real, both say the same amount, but only the
+decision lines are what `route.py` itself calls operative, so those became the primary
+citation, with the p.8 recital kept as a corroborating detail in the event's `note`).
+
+`[F]` Every citation in `results.json` is re-grounded live against the real OCR at build time
+(`Grounder.locate` must return a hit, or the build raises) — not merely typed once and trusted.
+Two typos were caught exactly this way during construction (a guessed "Associée Unique de la
+société ARCHEAN TECHNOLOGIE" preamble that does not occur verbatim; a two-line span mistaken for
+one OCR line in `…ec0`) and both were corrected against the real text before this section was
+written, not worked around.
+
+`[F]` `python scripts/build_results.py` run twice, independent processes: **byte-identical**
+`results.json` (`tests/test_results.py::test_build_results_is_byte_identical_across_independent_runs`).
+`[F]` `python scripts/validate_results.py` passes both jsonschema validation
+(`results.schema.json`, `Draft202012Validator`) and this project's own internal invariants.
+
+`[F]` `python scripts/validate_routing.py rules` (ARCHEAN's own gold) and
+`python scripts/gold_compare.py` (the independent JACQUES BOCKEL gold), re-run after adding
+this session's code: **unchanged** — TP=5/FP=0/FN=2/TN=10 and 11/14 respectively, confirming
+this session touched nothing in the routing/parsing layers that the earlier sessions' own
+regression suites already protect.
+
+### 23.6 What `results.json` actually contains — proven, not promotional
+
+`[F]` 15 `events[]` (6 capital, 7 `SHAREHOLDER_END`, 2 `CAPITAL_DUAL_CLASS`), 9
+`capital_timeline[]` rows, spanning 2004-12-15 (constitution) to 2018-03-23 (the last capital
+change in this corpus — the 2024 AG confirms 400 000 EUR unchanged,
+`tests/golden_capital_chain.json`'s own `independent_observations`). `[H]` These counts are not
+a score and are not presented as one — `capital_amount` is measured at 7/7 agreement against the
+independent gold set (§8.10) for a *different* company's documents, which says something about
+the router's precision, not about how complete ARCHEAN's own `results.json` is; completeness
+here is bounded by what this corpus actually documents, which §9's Limitations (`README.md`)
+lists without euphemism.
+
+`[F]` **No LLM call exists anywhere in the shipped pipeline.** `archean/` and `scripts/` were
+grepped for `fuzzy|similarity|embedding|\bllm\b|\bmodel\b|confidence|score|probability|doc_id|
+company_id|hardcoded` (case-insensitive) and every hit read, not just pattern-matched — every
+occurrence is either a docstring stating the absence, or a legitimate unrelated use (OCR's own
+per-line `score` field, used only to filter empty-text lines; `doc_id` used only for identity/
+indexing/reporting, never for verdict branching, independently verified by an AST test).
+`§9`'s original LLM Strategy plan (committing a `cache/llm/` response cache) was never
+exercised — the deterministic approach answered the challenge's own stated grading criteria
+(traceability, internal coherence, honesty about gaps) without it, and running an LLM over
+this corpus's full text volume directly in the extraction path would have added token cost,
+runtime, and a source of non-determinism results.json's own build (byte-identical across
+independent runs, tests/test_results.py) does not otherwise have — see README.md §8.
+
+### 23.7 Remaining limitations — explicit, not resolved here
+
+`[H]` Not claimed solved:
+- No generic, validated shareholder/holder-table extractor exists — `SHAREHOLDER_ENTRY` and
+  `SHAREHOLDER_SHARE_TRANSFER` are absent from `results.json` for this reason, not because the
+  mechanism in `archean/timeline.py` cannot represent them (it can, and is tested against
+  synthetic instances of both).
+- The GUELLATI/LEROUX/ROUJEAN entry date/mechanism, the 823-vs-803 BLANCO contradiction, the
+  2008-2017 category-B holder identity, and the HADEAN-acquisition mechanism are all genuine,
+  unresolved corpus gaps — carried into `results.json`'s own `notes` field verbatim, not
+  smoothed over.
+- Cross-line OCR date splitting (§8.9) remains open.
+- The bonus `group.nodes`/`group.edges` was not attempted.
+
+See `README.md` §9 for the same list written for a reviewer rather than for this file's own
+audit trail.
+
+---

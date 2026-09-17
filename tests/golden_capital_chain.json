@@ -1,0 +1,381 @@
+{
+  "_about": {
+    "what_this_is": "A hand-verified reference chain of ARCHEAN TECHNOLOGIES' nominal share capital, used ONLY as a test oracle. Every row was re-read directly in the OCR of the cited document during verification, and the bbox below was computed by the same conversion the pipeline uses.",
+    "what_this_is_NOT": [
+      "This is NOT an answer key. The challenge states plainly that no answer key exists and that Takeovers' own cross-checks flag unadjudicated contradictions in this company's capital chain.",
+      "This is NOT results.json and does not follow results.schema.json. results.json is the deliverable; this file is a regression oracle with a different shape and a different purpose.",
+      "This is NOT a shareholder ledger. Holder information appears only where a document states it. Where it does not, the field is null and `holders_status` says so."
+    ],
+    "how_to_use": "The pipeline must reproduce `capital_eur_after`, `shares_total_after` and `nominal_eur` for every row whose `status` is VERIFIED. Rows marked UNCERTAIN must not be used to fail a build; they are recorded so the uncertainty survives into the README instead of being quietly resolved.",
+    "provenance_convention": "bbox = [x0, y0, x1, y1], normalized 0-1 against that page's own width/height in points, origin top-left, page 1-indexed. OCR polygons are pixels at 300 dpi; conversion is px / (page.rect.<dim> * 300/72).",
+    "corpus": "data/480489707/actes/ of github.com/takeovers-ai/engineering-challenges",
+    "verified_on": "2026-09-15",
+    "legend": {
+      "VERIFIED": "every numeric field in the row is stated explicitly in the cited document and was read directly.",
+      "UNCERTAIN": "the numbers are stated, but some attribute (typically the effective date) is not unambiguously fixed by the corpus.",
+      "UNSUPPORTED": "no document in this corpus states it. Recorded as null, never inferred into a number."
+    }
+  },
+
+  "chain": [
+    {
+      "seq": 1,
+      "event_date": "2004-12-15",
+      "event_date_basis": "Signature date printed at the foot of the statutes themselves (\"Fait à Montauban / Le 15 décembre 2004\"), p.24. NOT the deposit date, which is 2005-01-25.",
+      "operation": "CONSTITUTION",
+      "delta_capital_eur": null,
+      "capital_eur_after": 37000,
+      "shares_total_after": 370,
+      "nominal_eur": 100,
+      "holders": [
+        { "name": "Xavier AUMONT", "kind": "PERSON", "shares": 155 },
+        { "name": "Antonio BLANCO MARINA", "kind": "PERSON", "shares": 155 },
+        { "name": "Franck GICQUEL", "kind": "PERSON", "shares": 60 }
+      ],
+      "holders_status": "VERIFIED",
+      "holders_note": "Article 7 lays the names in a left column and the counts in a right column; OCR line order interleaves them. Pairing was resolved geometrically by y-band (AUMONT y0=0.4444/155 y0=0.4439; BLANCO y0=0.4576/155 y0=0.4569; GICQUEL y0=0.4727/60 y0=0.4716), not by adjacency. Sums to 370.",
+      "status": "VERIFIED",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec5",
+        "page": 3,
+        "bbox": [0.1209, 0.415, 0.839, 0.4283],
+        "snippet": "Il est divisé en trois cent soixante dix (370) actions d'une seule catégorie de cent (100) euros de"
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec5",
+          "page": 24,
+          "bbox": [0.1777, 0.3545, 0.3418, 0.3692],
+          "snippet": "Le 15 décembre 2004",
+          "supports": "event_date"
+        }
+      ],
+      "ocr_hazard": "The digit form of the capital is OCR-corrupted on this page as \"37.0o0\". The French words \"trente sept mille\" on the same line are clean, and the page header repeats \"au capital de 37.000 Euros\" on all 24 pages. Value taken from words + header agreement, not from the corrupted digits."
+    },
+    {
+      "seq": 2,
+      "event_date": "2005-05-17",
+      "event_date_basis": "Body of the PV: \"Le 17 mai 2005,\" p.1. Deposited 2006-01-03, ~7.5 months later.",
+      "operation": "CAPITAL_INCREASE",
+      "delta_capital_eur": 113000,
+      "capital_eur_after": 150000,
+      "shares_total_after": 1500,
+      "nominal_eur": 100,
+      "holders": null,
+      "holders_status": "UNSUPPORTED",
+      "holders_note": "No document in this corpus states who subscribed the 1 130 new shares. The AGE of 2005-03-04 that decided the increase (referenced on p.2 of this same PV) is not in the corpus. Three names (Malik GUELLATI, Christophe LEROUX, Marielle ROUJEAN) are shareholders by 2005-08 without appearing at incorporation, so they most likely entered here — but their individual counts are not stated anywhere. Deliberately left null.",
+      "status": "VERIFIED",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec4",
+        "page": 2,
+        "bbox": [0.1216, 0.7837, 0.8896, 0.7998],
+        "snippet": "réalisation définitive de l'augmentation de capital de 113 000 € par la création de 1 130"
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec4",
+          "page": 2,
+          "bbox": [0.1215, 0.8663, 0.6876, 0.8834],
+          "snippet": "Il est divisé en 1 500 actions de 100 € chacune , de même catégorie. »",
+          "supports": "shares_total_after, nominal_eur"
+        },
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec3",
+          "page": 8,
+          "bbox": [0.1201, 0.1626, 0.5133, 0.1768],
+          "snippet": "de 113.000 euros afin d'être porté à 150.000 euros.",
+          "supports": "delta_capital_eur, capital_eur_after — independent recital in the 2008 statutes, Article 6"
+        }
+      ]
+    },
+    {
+      "seq": 3,
+      "event_date": "2005-08-16",
+      "event_date_basis": "Date the ordres de mouvement take effect, stated in the resolution. The AGE that ratified the protocol sat on 2005-08-08. Deposited 2006-01-04.",
+      "operation": "SHARE_TRANSFERS_ONLY",
+      "delta_capital_eur": 0,
+      "capital_eur_after": 150000,
+      "shares_total_after": 1500,
+      "nominal_eur": 100,
+      "holders": [
+        { "name": "Antonio BLANCO MARINA", "kind": "PERSON", "shares": 823 },
+        { "name": "Xavier AUMONT", "kind": "PERSON", "shares": 617 },
+        { "name": "Franck GICQUEL", "kind": "PERSON", "shares": 60 }
+      ],
+      "holders_status": "VERIFIED_BUT_CONTRADICTED",
+      "holders_note": "Stated explicitly and sums to 1 500. Pairing resolved geometrically by y-band. BUT see conflicts[]: the feuille de présence of the next AGE (2006-10-20) states 803/637/60 for the same three people with no intervening acte. Both documents are official. This chain does NOT pick a winner.",
+      "status": "VERIFIED",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec2",
+        "page": 6,
+        "bbox": [0.1057, 0.7432, 0.8083, 0.7569],
+        "snippet": "Il en résulte au terme des ordres de mouvement à émettre en date du 16 août 2005, la nouvelle"
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec2",
+          "page": 6,
+          "bbox": [0.4084, 0.7886, 0.4972, 0.8013],
+          "snippet": "823 actions",
+          "supports": "holders[0].shares"
+        }
+      ],
+      "document_internal_error": "The same table prints GICQUEL's 60 shares as \"6,00 %\" of 1 500. 60/1500 is 4,00 %. The share counts are self-consistent (823+617+60 = 1500); the percentage is not. Share counts trusted, percentage discarded."
+    },
+    {
+      "seq": 4,
+      "event_date": "2006-10-20",
+      "event_date_basis": "Date of the AGE that decided the increase (\"Le 20 octobre 2006,\" p.1), and the date the 2008 statutes attribute the operation to. See status_note — the realisation date is not fixed by the corpus.",
+      "operation": "CAPITAL_INCREASE",
+      "delta_capital_eur": 50000,
+      "capital_eur_after": 200000,
+      "shares_total_after": 2000,
+      "nominal_eur": 100,
+      "holders": null,
+      "holders_status": "UNSUPPORTED",
+      "holders_note": "The subscription was reserved to named beneficiaries with stated allocations (AUMONT 330, BLANCO 150, GICQUEL 20), but NO document in this corpus states the resulting cap table. A post-increase répartition article does not exist in this filing: the updated statutes give only \"deux mille (2000) actions\" with no holder list. Left null rather than computed.",
+      "status": "UNCERTAIN",
+      "status_note": "Capital, share count and nominal are VERIFIED. The EFFECTIVE DATE is uncertain: the AGE gave beneficiaries until 2006-11-16 to subscribe and libérer par compensation, and no constatation/réalisation act appears in the corpus. The operation therefore completed somewhere in [2006-10-20, 2006-11-16]. The 2008 statutes attribute it to the AGE date, which is what this row uses.",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec7",
+        "page": 3,
+        "bbox": [0.0499, 0.1685, 0.9479, 0.1841],
+        "snippet": "d'augmenter le capital social d'une somme de 50.000 euros, pour le porter de 150.000 euros"
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec7",
+          "page": 10,
+          "bbox": [0.1118, 0.5514, 0.8168, 0.566],
+          "snippet": "Il est divisé en deux mille (2000) actions d'une seule catégorie de cent (100) euros de nominal",
+          "supports": "shares_total_after, nominal_eur"
+        },
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec3",
+          "page": 8,
+          "bbox": [0.1194, 0.21, 0.505, 0.2251],
+          "snippet": "de 50.000 euros afin d'être porté à 200.000 euros.",
+          "supports": "delta_capital_eur, capital_eur_after"
+        }
+      ]
+    },
+    {
+      "seq": 5,
+      "event_date": "2008-06-27",
+      "event_date_basis": "\"EN DATE DU 27 JUIN 2008\", p.1. Deposited 2008-07-15.",
+      "operation": "NOMINAL_SPLIT",
+      "delta_capital_eur": 0,
+      "capital_eur_after": 200000,
+      "shares_total_after": 200000,
+      "nominal_eur": 1,
+      "holders": [
+        { "name": "HADEAN", "kind": "COMPANY", "siren": "499979540", "shares": 200000 }
+      ],
+      "holders_status": "VERIFIED",
+      "holders_note": "The decision is taken by \"La société HADEAN ... Associée Unique de la société ARCHEAN TECHNOLOGIES\", with SIREN 499 979 540 printed in the document. Sole shareholder, so the count follows from shares_total. HOW HADEAN acquired the shares is NOT documented in ARCHEAN's folder — see notes.unresolved.",
+      "status": "VERIFIED",
+      "status_note": "Nominal value divided by 100. Capital unchanged, share count multiplied by 100. This is not one of the five scored event codes; it is recorded here because rows 6-9 are unreadable without it.",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec3",
+        "page": 1,
+        "bbox": [0.1222, 0.5884, 0.8828, 0.609],
+        "snippet": "PRÉcisE qu'au résultat de cette opération, le capital qui reste fixé à 200.000 euros est désormais"
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec3",
+          "page": 8,
+          "bbox": [0.1209, 0.2593, 0.8814, 0.2724],
+          "snippet": "a été divisée par 100, le capital social étant resté fixé à 200.000 euros, est désormais divisé en",
+          "supports": "nominal_eur, shares_total_after"
+        }
+      ]
+    },
+    {
+      "seq": 6,
+      "event_date": "2008-06-27",
+      "event_date_basis": "Same décisions de l'associée unique. Intra-day order matters: this is Augmentation de Capital I and must apply after seq 5.",
+      "operation": "CAPITAL_INCREASE",
+      "delta_capital_eur": 17241,
+      "capital_eur_after": 217241,
+      "shares_total_after": 217241,
+      "nominal_eur": 1,
+      "holders": [
+        { "name": "HADEAN", "kind": "COMPANY", "siren": "499979540", "shares": 217241 }
+      ],
+      "holders_status": "VERIFIED",
+      "holders_note": "Article 7 of the statutes updated at this session states 217.241 actions de préférence de catégorie A, and the 2017 decision confirms the A shares are \"intégralement détenues par la société HADEAN\".",
+      "status": "VERIFIED",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec3",
+        "page": 8,
+        "bbox": [0.1216, 0.3213, 0.5042, 0.336],
+        "snippet": "de 17.241 euros afin d'être porté à 217.241 euros."
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec3",
+          "page": 2,
+          "bbox": [0.116, 0.9224, 0.8765, 0.944],
+          "snippet": "DÉciDE d'augmenter le capital social de la Société d'un montant nominal de 17.241 euros, par",
+          "supports": "delta_capital_eur"
+        }
+      ]
+    },
+    {
+      "seq": 7,
+      "event_date": "2008-06-27",
+      "event_date_basis": "Same décisions. Augmentation de Capital II; applies after seq 6.",
+      "operation": "CAPITAL_INCREASE",
+      "delta_capital_eur": 150861,
+      "capital_eur_after": 368102,
+      "shares_total_after": 368102,
+      "nominal_eur": 1,
+      "holders": null,
+      "holders_status": "PARTIAL",
+      "holders_note": "HADEAN's 217 241 category-A shares ARE stated (Article 7). The holders of the 150 861 category-B shares are NOT: the filed document is an *extrait*, and the resolutions naming the B subscribers (10, 12-15) are omitted from it. Four funds are named as holding exactly 150 861 B shares nine years later in the 2017 buyback, but attributing that split back to 2008 is an inference, not a fact, so holders is null here.",
+      "status": "VERIFIED",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec3",
+        "page": 8,
+        "bbox": [0.1209, 0.3682, 0.5146, 0.3848],
+        "snippet": "de 150.861 euros afin d'être porté à 368.102 euros."
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec3",
+          "page": 8,
+          "bbox": [0.1194, 0.4781, 0.6688, 0.4947],
+          "snippet": "Il est divisé en 368.102 actions de 1 euro chacune entièrement libérées.",
+          "supports": "shares_total_after, nominal_eur"
+        },
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec3",
+          "page": 8,
+          "bbox": [0.1799, 0.5571, 0.5348, 0.5748],
+          "snippet": "217.241 actions de préférence de catégorie A,",
+          "supports": "class split A/B"
+        }
+      ]
+    },
+    {
+      "seq": 8,
+      "event_date": "2017-02-21",
+      "event_date_basis": "Décisions du Président realising the reduction (\"EN DATE DU 21 FEVRIER 2017\"), and the date the shares are cancelled (\"Les actions rachetées sont annulées à compter de ce jour\"). The AG that AUTHORISED it sat on 2017-01-19; the capital did not change on that date. Deposited 2017-03-28.",
+      "operation": "CAPITAL_DECREASE",
+      "delta_capital_eur": -150861,
+      "capital_eur_after": 217241,
+      "shares_total_after": 217241,
+      "nominal_eur": 1,
+      "holders": [
+        { "name": "HADEAN", "kind": "COMPANY", "siren": "499979540", "shares": 217241 }
+      ],
+      "holders_status": "VERIFIED",
+      "holders_note": "Article 7 as rewritten by this decision: \"intégralement détenues par la société HADEAN\". The four sellers are named with exact counts summing to 150 861: FPCI SECURITE 64 655, FIP GALIA PME 4 12 931, GALIA VENTURE 30 172, FPCI FINANCIERE DE BRIENNE 43 103.",
+      "status": "VERIFIED",
+      "source": {
+        "inpi_id": "63e9593a8be6eb9f9d257ebe",
+        "page": 3,
+        "bbox": [0.1137, 0.3993, 0.8801, 0.4176],
+        "snippet": "être ramené de 368 102 euros à 217 241 euros et divisé en 217 241 actions de 1 euro de valeur"
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593a8be6eb9f9d257ebe",
+          "page": 3,
+          "bbox": [0.1174, 0.8545, 0.7894, 0.8733],
+          "snippet": "détenues par la société HADEAN, titulaire d'actions de préférence de catégorie A.",
+          "supports": "holders"
+        },
+        {
+          "inpi_id": "63e9593a8be6eb9f9d257ebe",
+          "page": 3,
+          "bbox": [0.1125, 0.3517, 0.5768, 0.3683],
+          "snippet": "Les actions rachetées sont annulées à compter de ce jour.",
+          "supports": "event_date"
+        }
+      ]
+    },
+    {
+      "seq": 9,
+      "event_date": "2018-03-23",
+      "event_date_basis": "\"EN DATE DU 23 MARS 2018\", p.2. Deposited 2018-05-30.",
+      "operation": "CAPITAL_INCREASE",
+      "delta_capital_eur": 182759,
+      "capital_eur_after": 400000,
+      "shares_total_after": 400000,
+      "nominal_eur": 1,
+      "holders": [
+        { "name": "HADEAN", "kind": "COMPANY", "siren": "499979540", "shares": 400000 }
+      ],
+      "holders_status": "VERIFIED",
+      "holders_note": "Incorporation de réserves; the 182 759 new shares are \"attribuées gratuitement à l'Associé Unique\". Article 7 as rewritten: \"intégralement détenues par la société HADEAN\".",
+      "status": "VERIFIED",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec0",
+        "page": 2,
+        "bbox": [0.1061, 0.7043, 0.8781, 0.7243],
+        "snippet": "L'Associée Unique décide d'augmenter le capital social d'un montant de 182 759 euros par"
+      },
+      "corroboration": [
+        {
+          "inpi_id": "63e9593b8be6eb9f9d257ec0",
+          "page": 3,
+          "bbox": [0.1234, 0.3965, 0.8934, 0.415],
+          "snippet": "Il est divisé en 400 000 actions de 1 euro chacune entièrement libérées, intégralement",
+          "supports": "shares_total_after, capital_eur_after"
+        }
+      ],
+      "document_internal_error": "The Article 6 clause added by this same decision reads \"le capital social a été augmenté de 185 759 euros ... pour être porté à 400 000\" on p.3, repeated verbatim on p.7 of the updated statutes. The operative decision on p.2 says 182 759, twice, and 217 241 + 182 759 = 400 000 exactly. Verified by rendering p.3 at 130 dpi and reading it directly: the PDF really does print 185 759, so this is the drafter's error propagated into the statutes, NOT an OCR artefact. 182 759 is used."
+    }
+  ],
+
+  "independent_observations": [
+    {
+      "observed_on": "2006-10-20",
+      "what": "Cap-table snapshot from the feuille de présence annexed to the AGE, BEFORE that day's capital increase.",
+      "holders": [
+        { "name": "Antonio BLANCO MARINA", "shares": 803 },
+        { "name": "Xavier AUMONT", "shares": 637 },
+        { "name": "Franck GICQUEL", "shares": 60 }
+      ],
+      "sums_to": 1500,
+      "why_it_matters": "It contradicts chain seq 3 (823/617/60, also summing to 1 500). 20 shares moved from BLANCO to AUMONT between 2005-08-16 and 2006-10-20 with no acte in this corpus recording the movement. Recorded here as evidence rather than folded into the chain, because neither document can be shown wrong.",
+      "source": {
+        "inpi_id": "63e9593b8be6eb9f9d257ec7",
+        "page": 6,
+        "bbox": [0.7203, 0.3775, 0.7629, 0.3965],
+        "snippet": "803"
+      }
+    },
+    {
+      "observed_on": "2024-06-24",
+      "what": "Latest capital confirmation in the corpus. No capital event; the AG approves the 2023 accounts.",
+      "capital_eur": 400000,
+      "why_it_matters": "Closes the timeline: the capital is unchanged from 2018-03-23 to the most recent filing. Not a chain row because nothing moved.",
+      "source": {
+        "inpi_id": "6936b4160bb493b0e4098925",
+        "page": 1,
+        "bbox": [0.2076, 0.0727, 0.7904, 0.0893],
+        "snippet": "Société par actions simplifiée au capital de 400 000 euros"
+      }
+    }
+  ],
+
+  "invariants_this_chain_satisfies": [
+    "capital_eur_after == shares_total_after * nominal_eur on every row",
+    "capital_eur_after[n] == capital_eur_after[n-1] + delta_capital_eur[n] on every row after the first",
+    "holder shares sum to shares_total_after wherever holders is non-null",
+    "every event_date is <= the dateDepot of its source document",
+    "every bbox satisfies 0 <= v <= 1, x0 < x1, y0 < y1"
+  ],
+
+  "unresolved": [
+    "Who subscribed the 1 130 shares of the 2005-05-17 increase. The deciding AGE of 2005-03-04 is not in the corpus.",
+    "How Malik GUELLATI, Christophe LEROUX and Marielle ROUJEAN acquired their shares, and how many each held before selling everything on 2005-08-16.",
+    "Whether BLANCO held 823 or 803 shares — two official documents disagree and no acte reconciles them.",
+    "The exact realisation date of the 2006-10-20 increase (subscription window ran to 2006-11-16; no constatation act filed).",
+    "Who held the 150 861 category-B shares between 2008 and 2017. The 2008 filing is an extrait that omits the subscriber resolutions.",
+    "How HADEAN came to hold 100% of ARCHEAN between 2007 and 2008-06-27. No acte in ARCHEAN's own folder records it; HADEAN's folder (data/499979540/) does, which qualifies the brief's statement that this timeline is reconstructable from 480489707's folder alone."
+  ]
+}
